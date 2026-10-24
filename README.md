@@ -108,3 +108,25 @@ include profitable-route ranking, live stock verification or interactive map mar
 - Sign location uses exact sign block coordinates. Location lookups are throttled to one every 1.5 seconds; lots of sign records can take some time to enrich. `/emprice locate` can retry unresolved records.
 - This scanner does **not** click chests/signs, issue transactions, request remote chunks, or read server-side unseen data. A plugin creating virtual sign text rather than synced sign block entities may not be discovered by this approach.
 - `autoscan` setting is intentionally session-only in v0.4.0. Switch it on after joining the server.
+
+## v0.4.2 — Batched location lookups and persistent cache
+
+The sign scanner now queues location lookups, deduplicates them by Minecraft
+16×16 chunk, and sends up to 40 different locations in each `POST /v4/location`.
+Only one request is in flight at a time. Requests are spaced by at least
+2 seconds. HTTP 429 leaves all queued locations intact and waits for the
+server `Retry-After` response (or uses exponential backoff).
+
+Successful results are kept for 6 hours and written to
+`config/earthmc-market/location-cache.json`; rejected/failed results are not
+persisted. An old failed quote can be retried with `/emprice locate` (up to
+10 old records per command), but fresh sign scans are queued automatically.
+`/emprice locdebug` shows queued chunk count, requests and backoff seconds.
+
+The town/nation identifies the **sign's in-world claim**, not the sign owner's
+resident town. Location results and sign prices remain time-limited snapshots.
+Do not assume availability or permission to teleport.
+
+**Important:** The previous v0.4.0 README line stating one location API request
+per 1.5 seconds is obsolete as of v0.4.2; the new batch worker manages request
+pacing. The first scan may still require time to enrich all entries.

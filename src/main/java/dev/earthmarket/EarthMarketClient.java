@@ -31,7 +31,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final Path BACKUP = DIRECTORY.resolve("prices-backup.json");
     private static final List<Quote> QUOTES = new ArrayList<>();
     private static final NearbySignScanner SIGNS = new NearbySignScanner(EarthMarketClient::foundSign);
-    private static long lastSignLookupAt = 0;
+    
     private static long lastSignSaveAt = 0;
     private static boolean signDirty = false;
     private static final Deque<Quote> SIGN_LOCATION_QUEUE = new ArrayDeque<>();
@@ -49,10 +49,12 @@ public final class EarthMarketClient implements ClientModInitializer {
         load();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             SIGNS.tick(client);
-            if (client.level != null && !SIGN_LOCATION_QUEUE.isEmpty() && System.currentTimeMillis() - lastSignLookupAt >= 1500L) {
-                lastSignLookupAt = System.currentTimeMillis();
-                Quote queued = SIGN_LOCATION_QUEUE.pollFirst();
-                if (QUOTES.contains(queued)) resolveSignLocation(queued);
+            // Drain into resolver's deduplicated batch queue; HTTP requests are paced there.
+            if (client.level != null) {
+                for (int i = 0; i < 80 && !SIGN_LOCATION_QUEUE.isEmpty(); i++) {
+                    Quote queued = SIGN_LOCATION_QUEUE.pollFirst();
+                    if (QUOTES.contains(queued)) resolveSignLocation(queued);
+                }
             }
             if (signDirty && System.currentTimeMillis() - lastSignSaveAt > 2000L) {
                 signDirty = false; lastSignSaveAt = System.currentTimeMillis(); save();
@@ -101,10 +103,11 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("recent").executes(ctx -> { recent(); return 1; }))
                 .then(literal("stats").executes(ctx -> { stats(); return 1; }))
                 .then(literal("locate").executes(ctx -> { locateUnknown(); return 1; }))
+                .then(literal("locdebug").executes(ctx -> { locationDebug(); return 1; }))
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | scan | autoscan <on|off> | recent | stats | locate | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | scan | autoscan <on|off> | recent | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;
@@ -189,7 +192,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         QUOTES.removeIf(old -> "earthmc-sign".equals(old.source) && old.x == q.x && old.y == q.y && old.z == q.z
             && Objects.equals(old.signSide, q.signSide));
         upsert(q); signDirty = true;
-        // Queue lookups, max one every 1.5s. Avoid bursts against EarthMC API.
+        // Resolver deduplicates by chunk and batches up to 40 coordinates per HTTP request.
         SIGN_LOCATION_QUEUE.addLast(q);
     }
 
@@ -200,7 +203,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 q.town = result.town(); q.nation = result.nation();
                 q.locationStatus = result.wilderness() ? "wilderness" : "confirmed";
                 save();
-            } else q.locationStatus = "api-failed";
+            } else { q.locationStatus = "api-failed"; save(); }
         }));
     }
 
@@ -219,6 +222,17 @@ public final class EarthMarketClient implements ClientModInitializer {
                 if (result.ok()) say("Shop location: " + place(q) + " (" + q.locationAccuracy + ")");
             }
         }));
+    }
+
+    private static void locationDebug() {
+        long total = QUOTES.stream().filter(q -> "earthmc-sign".equals(q.source)).count();
+        long confirmed = QUOTES.stream().filter(q -> "earthmc-sign".equals(q.source) && "confirmed".equals(q.locationStatus)).count();
+        long wild = QUOTES.stream().filter(q -> "earthmc-sign".equals(q.source) && "wilderness".equals(q.locationStatus)).count();
+        long failed = QUOTES.stream().filter(q -> "earthmc-sign".equals(q.source) && "api-failed".equals(q.locationStatus)).count();
+        say("Sign locations: total=" + total + " confirmed=" + confirmed + " wilderness=" + wild + " failed=" + failed + " waiting=" + (total - confirmed - wild - failed));
+        say(EarthLocationResolver.diagnostics());
+        QUOTES.stream().filter(q -> "earthmc-sign".equals(q.source) && !"confirmed".equals(q.locationStatus))
+            .limit(3).forEach(q -> say(q.item + " @ " + q.x + "," + q.z + " => " + (q.locationStatus == null ? "pending" : q.locationStatus)));
     }
 
     private static void locateUnknown() {
