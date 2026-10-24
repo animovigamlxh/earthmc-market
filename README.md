@@ -130,3 +130,28 @@ Do not assume availability or permission to teleport.
 **Important:** The previous v0.4.0 README line stating one location API request
 per 1.5 seconds is obsolete as of v0.4.2; the new batch worker manages request
 pacing. The first scan may still require time to enrich all entries.
+
+
+## v0.4.3 GUI pricing & stock
+The GUI now shows the original offer `1G / 64x` as well as gold per item, and a stock/status line. SELL is current inventory and BUY is remaining purchase space **only when returned by a QuickShop inspection**. Sign-only quotes have no confirmed quantity and show `stock ? (sign)`. Quotes are snapshots and may go stale.
+
+
+## v0.4.4: GUI destination shortcut
+
+The Market GUI now shows two buttons on each quote row: **T** (town) and **N** (nation).
+Clicking one pre-fills `/t spawn <town>` or `/n spawn <nation>` in the chat input and closes the Market GUI.
+Press **Enter** to send the command; no travel command is sent automatically.
+Buttons are disabled when the API has not resolved the location. Only use confirmed, accurate shop locations for travel; player-approx locations can indicate a neighbouring claim.
+It does not guarantee that the town/nation has a public spawn.
+
+## v0.4.5: scanner deduplication fix
+
+Sign identity now uses `dimension + exact XYZ + front/back`. A change in item or
+price updates the same physical sign, but different sign faces or dimensions no
+longer overwrite one another. An incoming manual or QuickShop record will not
+replace a sign record solely because item/owner/coordinates match.
+
+Existing records that were previously overwritten cannot be recovered from
+the saved database; rescan affected towns. Pre-v0.4.5 saved records have no
+dimension field, so they may remain as legacy entries; create a backup before
+rebuilding the database.

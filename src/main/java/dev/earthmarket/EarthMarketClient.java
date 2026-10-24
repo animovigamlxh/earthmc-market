@@ -178,22 +178,36 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static void foundSign(BlockPos pos, NearbySignScanner.Found found) {
         var p = found.quote();
         String item = normalized(p.item());
+        var level = Minecraft.getInstance().level;
+        String dimension = level == null ? null : level.dimension().toString();
+        Quote matched = null;
         for (Quote old : QUOTES) {
-            if (!"earthmc-sign".equals(old.source) || old.x != pos.getX() || old.y != pos.getY() || old.z != pos.getZ()
-                || !Objects.equals(old.signSide, found.side())) continue;
+            if (!"earthmc-sign".equals(old.source)
+                || old.x != pos.getX() || old.y != pos.getY() || old.z != pos.getZ()
+                || !Objects.equals(old.signSide, found.side())
+                || !Objects.equals(old.dimension, dimension)) continue;
+            matched = old;
             if (Objects.equals(old.item, item) && Objects.equals(old.type, p.type())
-                && Objects.equals(old.shop, p.owner()) && old.price == p.gold() && old.amount == p.amount()) return;
+                && Objects.equals(old.shop, p.owner()) && old.price == p.gold()
+                && old.amount == p.amount()) return;
+            break;
         }
         Quote q = new Quote();
         q.item = item; q.type = p.type(); q.shop = p.owner(); q.amount = p.amount(); q.price = p.gold();
         q.x = pos.getX(); q.y = pos.getY(); q.z = pos.getZ(); q.signSide = found.side();
+        q.dimension = dimension;
         q.status = found.redOwner() ? "sign-red-unverified" : "sign-unverified";
         q.source = "earthmc-sign"; q.locationAccuracy = "sign-block"; q.updated = Instant.now().toString();
-        QUOTES.removeIf(old -> "earthmc-sign".equals(old.source) && old.x == q.x && old.y == q.y && old.z == q.z
-            && Objects.equals(old.signSide, q.signSide));
+        // Preserve completed API location lookups across price edits.
+        if (matched != null) {
+            q.town = matched.town; q.nation = matched.nation;
+            q.locationStatus = matched.locationStatus;
+            QUOTES.remove(matched);
+        }
         upsert(q); signDirty = true;
-        // Resolver deduplicates by chunk and batches up to 40 coordinates per HTTP request.
-        SIGN_LOCATION_QUEUE.addLast(q);
+        if (!"confirmed".equals(q.locationStatus) && !"wilderness".equals(q.locationStatus)) {
+            SIGN_LOCATION_QUEUE.addLast(q);
+        }
     }
 
     private static void resolveSignLocation(Quote q) {
@@ -333,8 +347,23 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     private static void upsert(Quote q) {
-        QUOTES.removeIf(old -> old.item.equals(q.item) && old.type.equals(q.type)
-            && old.x == q.x && old.y == q.y && old.z == q.z && old.shop.equals(q.shop));
+        QUOTES.removeIf(old -> {
+            if ("earthmc-sign".equals(q.source)) {
+                // Same sign identity requires dimension + exact block + sign face.
+                // Items and price can change without becoming a new physical shop.
+                return "earthmc-sign".equals(old.source)
+                    && old.x == q.x && old.y == q.y && old.z == q.z
+                    && Objects.equals(old.dimension, q.dimension)
+                    && Objects.equals(old.signSide, q.signSide);
+            }
+            if ("earthmc-sign".equals(old.source)) return false;
+            return Objects.equals(old.source, q.source)
+                && Objects.equals(old.item, q.item)
+                && Objects.equals(old.type, q.type)
+                && old.x == q.x && old.y == q.y && old.z == q.z
+                && Objects.equals(old.dimension, q.dimension)
+                && Objects.equals(old.shop, q.shop);
+        });
         QUOTES.add(q);
     }
 
@@ -413,6 +442,6 @@ public final class EarthMarketClient implements ClientModInitializer {
         int amount, x, y, z;
         Integer available;
         String status;
-        String town, nation, locationStatus, locationAccuracy, signSide;
+        String town, nation, locationStatus, locationAccuracy, signSide, dimension;
     }
 }
