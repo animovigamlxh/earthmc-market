@@ -28,11 +28,14 @@ public final class CapitalTravelResolver {
     /** Prepare an appropriate command by checking the official town capital flag.
      * When the status cannot be verified, refrain from guessing. */
     public static void prepare(Minecraft mc, String town, String nation) {
+        prepare(mc, town, nation, null);
+    }
+    public static void prepare(Minecraft mc, String town, String nation, EarthMarketClient.DisplayQuote shop) {
         if (!valid(town)) { notify(mc, "Shop town is unknown; cannot choose a teleport command."); return; }
         String key = town.toLowerCase(Locale.ROOT);
         Cached cached = CACHE.get(key);
         if (cached != null && cached.until > System.currentTimeMillis()) {
-            openDraft(mc, town, nation, cached.capital); return;
+            openDraft(mc, town, nation, cached.capital, shop); return;
         }
         notify(mc, "Checking whether " + town + " is a nation capital...");
         PENDING.computeIfAbsent(key, k -> {
@@ -66,16 +69,17 @@ public final class CapitalTravelResolver {
             if (error != null) {
                 notify(mc, "Cannot verify capital status (network/API). Use T/N manually; no destination was guessed.");
             } else {
-                openDraft(mc, town, nation, capital);
+                openDraft(mc, town, nation, capital, shop);
             }
         }));
     }
-    private static void openDraft(Minecraft mc, String town, String nation, boolean capital) {
+    private static void openDraft(Minecraft mc, String town, String nation, boolean capital, EarthMarketClient.DisplayQuote shop) {
         if (capital && !valid(nation)) {
             notify(mc, "This is a capital but its nation is unknown; cannot prepare /n spawn.");
             return;
         }
         String command = capital ? "/n spawn " + nation : "/t spawn " + town;
+        if (shop != null) PendingShopTravel.arm(shop, command);
         mc.gui.setScreen(new ChatScreen(command, false));
     }
     private static void notify(Minecraft mc, String message) {

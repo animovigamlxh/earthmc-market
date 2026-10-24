@@ -53,9 +53,11 @@ public final class EarthMarketClient implements ClientModInitializer {
     @Override public void onInitializeClient() {
         load();
         ShopEspRenderer.register();
+        PendingShopTravel.register();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             SIGNS.tick(client);
             ShopLocator.tick(client);
+            PendingShopTravel.tick(client);
             if (enchantCaptureShop != null && System.currentTimeMillis() > enchantCaptureDeadline) finishEnchantCapture();
             // Drain into resolver's deduplicated batch queue; HTTP requests are paced there.
             if (client.level != null) {

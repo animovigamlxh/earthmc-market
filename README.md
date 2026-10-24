@@ -235,3 +235,14 @@ If crashes persist, turn off autoscan, temporarily reduce Minecraft view distanc
 
 ## v0.5.7
 Replaced the 26.2-incompatible ShopEspRenderer with the 26.2 LevelExtractionEvents/LevelRenderEvents and StagedVertexBuffer rendering pipeline. ESP remains an experimental feature pending Fabric build and in-game test.
+
+## v0.5.8 – Auto-highlight after travel
+
+Selecting Go (or Go Buy / Go Sell) drafts the teleport command without sending it. After the player actually sends the same command, the client waits five seconds, then checks every second whether the target's precise sign location is loaded and within 48 blocks. When it is, the ordinary H locator / ESP begins a six-second highlight. It cancels after one minute if never nearby; it does not blindly label a remote shop. Teleporting to a town spawn may still leave the shop over 48 blocks away, in which case walk closer within the one-minute window or use H manually. No teleport is sent by the mod.
+
+### v0.5.9 Go tracking
+When a prepared Go command is actually sent with Enter, the client watches for
+movement/teleport away from the departure position. It then checks every 5 client
+ticks for the chosen shop block within 48 blocks and loaded. It highlights
+immediately upon entering range (no fixed five-second delay), or expires after
+three minutes. A different command or an unsent draft cancels tracking.

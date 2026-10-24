@@ -56,7 +56,7 @@ public final class ArbitrageScreen extends Screen {
     private void travel(int i, boolean toBuy) {
         Opportunity o = current[i]; if (o == null) return;
         var q = toBuy ? o.ask : o.bid;
-        CapitalTravelResolver.prepare(minecraft, q.town(), q.nation());
+        CapitalTravelResolver.prepare(minecraft, q.town(), q.nation(), q);
     }
     private void update() {
         if(search==null) return;

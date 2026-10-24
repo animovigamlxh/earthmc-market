@@ -94,7 +94,7 @@ public final class MarketScreen extends Screen {
     private void openTravel(int row, boolean ignored) {
         EarthMarketClient.DisplayQuote q = rowQuotes[row];
         if (q == null) return;
-        CapitalTravelResolver.prepare(this.minecraft, q.town(), q.nation());
+        CapitalTravelResolver.prepare(this.minecraft, q.town(), q.nation(), q);
     }
 
     private void refresh() {
