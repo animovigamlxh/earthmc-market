@@ -224,3 +224,10 @@ The market's **Go** button and arbitrage **Go Buy/Go Sell** inspect the shop's *
 - Retained `/emprice scan`, `/emprice autoscan on/off`, GUI, arbitrage, and older prices.json.
 
 If crashes persist, turn off autoscan, temporarily reduce Minecraft view distance, and send the newest `crash-reports/*.txt` and `logs/latest.log`.
+
+
+## v0.5.5 Shop marker fix
+- H now displays a brighter 3-D particle outline on all twelve block edges for six seconds.
+- Legacy sign records without dimension are accepted only while nearby and loaded; mismatch dimensions still reject.
+- Ambiguous/missing chests use the saved exact shop sign instead of silently failing.
+- Requires client particle rendering to be enabled; particles are not visible through walls.

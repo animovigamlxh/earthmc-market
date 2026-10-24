@@ -2,7 +2,6 @@ package dev.earthmarket;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -12,17 +11,18 @@ public final class ShopLocator {
     private static String dimension;
     private static int ticksLeft;
     private static int age;
+    private static boolean markerIsSign;
 
     private ShopLocator() {}
 
     public static String start(EarthMarketClient.DisplayQuote quote) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) return "Join a world first.";
-        if (!"earthmc-sign".equals(quote.source()) && !"target-block".equals(quote.accuracy())) {
+        if (!"earthmc-sign".equals(quote.source()) && !"sign-block".equals(quote.accuracy())) {
             return "No exact sign/block position saved. Rescan this shop nearby.";
         }
-        if (quote.dimension() == null || !quote.dimension().equals(mc.level.dimension().toString())) {
-            return "Shop is in a different or unknown dimension.";
+        if (quote.dimension() != null && !quote.dimension().equals(mc.level.dimension().toString())) {
+            return "Shop is in a different dimension.";
         }
         BlockPos sign = new BlockPos(quote.x(), quote.y(), quote.z());
         if (!mc.level.hasChunkAt(sign)) return "Shop chunk is not loaded. Get closer first.";
@@ -40,13 +40,15 @@ public final class ShopLocator {
             if (d < best) { best = d; found = p; tied = 1; }
             else if (d == best) tied++;
         }
-        if (found == null) return "No loaded chest/barrel found near the saved shop sign.";
-        if (tied != 1) return "Multiple equally close containers: cannot reliably identify this shop.";
-        target = found;
+        // An exact sign is a valid fallback marker. Do not guess among multiple chests.
+        markerIsSign = found == null || tied != 1;
+        target = markerIsSign ? sign : found;
         dimension = mc.level.dimension().toString();
         ticksLeft = 120;
         age = 0;
-        return "Highlighting container at " + found.toShortString() + " for 6 seconds.";
+        return markerIsSign
+            ? "Multiple/no matching containers; outlining SHOP SIGN at " + sign.toShortString() + " for 6 seconds."
+            : "Highlighting container at " + found.toShortString() + " for 6 seconds.";
     }
 
     public static void tick(Minecraft mc) {
@@ -56,19 +58,11 @@ public final class ShopLocator {
             target = null;
             return;
         }
-        if ((age++ % 8) >= 3) return; // blinking, not a continuous glow
-        if (age % 2 != 0) return;
-        // 12 points on box edges; client-side particles only, no server messages.
-        for (int i = 0; i <= 4; i++) {
-            double t = i / 4.0;
-            particle(mc, target.getX() + t, target.getY() + .02, target.getZ() + .02);
-            particle(mc, target.getX() + t, target.getY() + 1.02, target.getZ() + 1.02);
-            particle(mc, target.getX() + .02, target.getY() + t, target.getZ() + .02);
-            particle(mc, target.getX() + 1.02, target.getY() + t, target.getZ() + 1.02);
-        }
+        age++;
     }
 
-    private static void particle(Minecraft mc, double x, double y, double z) {
-        mc.level.addParticle(ParticleTypes.END_ROD, x, y, z, 0, 0, 0);
+    /** Used exclusively during the render extraction phase. */
+    public static BlockPos renderTarget() {
+        return ticksLeft > 0 ? target : null;
     }
 }

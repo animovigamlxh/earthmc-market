@@ -52,6 +52,7 @@ public final class EarthMarketClient implements ClientModInitializer {
 
     @Override public void onInitializeClient() {
         load();
+        ShopEspRenderer.register();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             SIGNS.tick(client);
             ShopLocator.tick(client);
