@@ -231,3 +231,7 @@ If crashes persist, turn off autoscan, temporarily reduce Minecraft view distanc
 - Legacy sign records without dimension are accepted only while nearby and loaded; mismatch dimensions still reject.
 - Ambiguous/missing chests use the saved exact shop sign instead of silently failing.
 - Requires client particle rendering to be enabled; particles are not visible through walls.
+
+
+## v0.5.7
+Replaced the 26.2-incompatible ShopEspRenderer with the 26.2 LevelExtractionEvents/LevelRenderEvents and StagedVertexBuffer rendering pipeline. ESP remains an experimental feature pending Fabric build and in-game test.
