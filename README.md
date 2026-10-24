@@ -48,3 +48,38 @@ Minecraft 26.2 requires JDK 25. Run `gradle build` with Gradle 9.5.1 and Fabric 
 4. If the run is red, open **Build Fabric mod** and copy the last relevant compile error to the developer. This first release has not been compile-tested locally yet.
 
 The workflow does not publish a release or access your Minecraft credentials. It runs on GitHub's hosted runner. Do not commit account tokens or EarthMC API keys to a repository.
+
+
+## v0.2.1 commands / persistence check
+
+- `/emprice stats` shows saved observation totals and the database path.
+- `/emprice backup` writes `config/earthmc-market/prices-backup.json` without changing the active database.
+- `/emprice recent` confirms that scans survived a full game restart.
+- `/emprice reload` rereads the database while in game.
+- `/emprice find <item>` reports a spread only if positive. This is still based on potentially stale observations.
+
+**Important:** Auto-scan coordinates are the player's position when the inspection message arrived, not the exact chest block. Walking around a shop may create duplicate records. Avoid treating a displayed profit as guaranteed: inspect stock, permissions, taxes, and prices immediately before a transaction.
+
+## v0.2.2 查询修复
+
+`/emprice find` 现在接收完整名称（包含空格、中文），例如 `/emprice find 风爆 I` 或 `/emprice find 珠光蛙明灯`。如果没有精确匹配，会查询包含输入关键字的报价。模糊查询返回多个物品时，不进行跨物品套利计算。
+
+## v0.2.3: EarthMC town/nation lookup
+
+The mod now queries the official `POST https://api.earthmc.net/v4/location` endpoint
+with `[x,z]` for each newly scanned QuickShop. This looks up the **shop's
+physical location**, not the shop owner's resident town/nation. It runs
+asynchronously, caches responses by 16x16 claim chunk for six hours, and stores
+`town`, `nation`, `locationStatus`, and `locationAccuracy` alongside the quote.
+
+`/emprice find <item>` and `/emprice recent` show town and nation beside the
+owner and price. `/emprice locate` retries up to 10 older/unresolved scanned
+quotes. The `player-approx` tag means a nearby player's coordinates were used
+rather than a block target; claim ownership may be wrong near a town border.
+`target-block` means the client's current aimed block was close enough to use.
+`Town/Nation pending` means the API result is still unknown; it is *not*
+permission to conclude the shop is in the wilderness. Quotes are never deleted
+because of an API outage. Only overworld Earth coords should be assumed to
+map to the EarthMC Towny claims; do not rely on the lookup in other dimensions.
+
+Town/nation fields are snapshots and can change as claims move.
