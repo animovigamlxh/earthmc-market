@@ -20,6 +20,8 @@ public final class MarketScreen extends Screen {
     private EditBox search;
     private String filter = "ALL";
     private boolean ascending = true;
+    private int availabilityFilter = 0; // 0 all, 1 confirmed, 2 unknown, 3 unavailable
+    private Button availabilityButton;
     private int page = 0;
     private List<EarthMarketClient.DisplayQuote> visible = List.of();
     private Button previous;
@@ -52,6 +54,15 @@ public final class MarketScreen extends Screen {
             direction.setMessage(Component.literal(ascending ? "Price ^" : "Price v"));
             page = 0; refresh();
         }).bounds(left + 426, top + 25, 122, 20).build());
+        availabilityButton = addRenderableWidget(Button.builder(Component.literal("Stock: ALL"), b -> {
+            availabilityFilter = (availabilityFilter + 1) % 4;
+            availabilityButton.setMessage(Component.literal(switch (availabilityFilter) {
+                case 1 -> "Stock: OK"; case 2 -> "Stock: ?"; case 3 -> "Stock: X"; default -> "Stock: ALL";
+            }));
+            page = 0; refresh();
+        }).bounds(left + 315, top + 297, 110, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Arbitrage"), b -> this.minecraft.gui.setScreen(new ArbitrageScreen()))
+            .bounds(left + 158, top + 297, 78, 20).build());
         previous = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> { page--; refresh(); })
             .bounds(left + 6, top + 297, 80, 20).build());
         next = addRenderableWidget(Button.builder(Component.literal("Next >"), b -> { page++; refresh(); })
@@ -86,8 +97,12 @@ public final class MarketScreen extends Screen {
         String query = search.getValue().strip().toLowerCase(Locale.ROOT);
         List<EarthMarketClient.DisplayQuote> data = new ArrayList<>();
         for (var q : EarthMarketClient.displayQuotes()) {
+            int stock = stockClass(q);
+            if (availabilityFilter == 1 && stock != 1) continue;
+            if (availabilityFilter == 2 && stock != 2) continue;
+            if (availabilityFilter == 3 && stock != 3) continue;
             if (!filter.equals("ALL") && !filter.equalsIgnoreCase(q.type())) continue;
-            String haystack = (safe(q.item()) + " " + safe(q.shop()) + " " + safe(q.town()) + " " + safe(q.nation()))
+            String haystack = (EarthMarketClient.variantLabel(q) + " " + safe(q.shop()) + " " + safe(q.town()) + " " + safe(q.nation()))
                 .toLowerCase(Locale.ROOT);
             if (!haystack.contains(query)) continue;
             data.add(q);
@@ -132,8 +147,15 @@ public final class MarketScreen extends Screen {
         return price + "G / " + q.amount() + "x";
     }
 
+    static int stockClass(EarthMarketClient.DisplayQuote q) {
+        if ("out-of-stock".equals(q.status()) || "full".equals(q.status()) || "unavailable".equals(q.status()) || "sign-red-unverified".equals(q.status()) || q.available() != null && q.available() <= 0) return 3;
+        if (q.available() == null || "sign-unverified".equals(q.status())) return 2;
+        return 1;
+    }
+
     private static String stockLabel(EarthMarketClient.DisplayQuote q) {
-        if (q.available() == null) return "stock ? (sign)";
+        if ("sign-red-unverified".equals(q.status())) return "UNAVAILABLE ?";
+        if (q.available() == null) return "stock ? (unverified)";
         if ("out-of-stock".equals(q.status())) return "OUT OF STOCK";
         if ("full".equals(q.status())) return "BUY FULL";
         return ("BUY".equalsIgnoreCase(q.type()) ? "space " : "stock ") + q.available();
@@ -159,19 +181,19 @@ public final class MarketScreen extends Screen {
             graphics.fill(left + 4, y - 2, left + PANEL_W - 4, y + 21, i % 2 == 0 ? 0x66334455 : 0x44243341);
             boolean buying = "BUY".equalsIgnoreCase(q.type());
             int fg = buying ? 0xFF78DEA0 : 0xFFFFD17D;
-            graphics.text(this.font, (buying ? "B " : "S ") + shortText(q.item(), 20), left + 7, y, fg, false);
+            graphics.text(this.font, (buying ? "B " : "S ") + shortText(EarthMarketClient.variantLabel(q), 20), left + 7, y, fg, false);
             // The original per-trade amount/price is displayed separately from the normalized unit price.
             graphics.text(this.font, originalPrice(q), left + 164, y, 0xFFFFFFFF, false);
             graphics.text(this.font, String.format(Locale.ROOT, "%.4f", q.unitPrice()), left + 286, y, 0xFFFFFFFF, false);
             graphics.text(this.font, shortText(safe(q.town()).isBlank() ? "(unknown)" : q.town(), 13), left + 390, y, 0xFFB8D9F8, false);
             // A sign alone never reveals real stock: show unknown, not zero.
-            graphics.text(this.font, shortText(q.shop(), 15) + "  " + stockLabel(q), left + 17, y + 11, 0xFFB8BEC7, false);
+            graphics.text(this.font, shortText(q.shop() + (q.enchantments() == null || q.enchantments().isBlank() ? "" : " | " + q.enchantments()), 38) + "  " + stockLabel(q), left + 17, y + 11, 0xFFB8BEC7, false);
             graphics.text(this.font, shortText(q.nation(), 13), left + 390, y + 11, 0xFF95A8B5, false);
         }
         int pages = Math.max(1, (visible.size() + PAGE_SIZE - 1) / PAGE_SIZE);
         graphics.text(this.font, "Records: " + visible.size() + "   Page " + (page + 1) + "/" + pages,
             left + 6, top + 278, 0xFFE0E4EA, false);
-        graphics.text(this.font, "Stock ? = unverified | T: town spawn | N: nation spawn (Enter to confirm)",
+        graphics.text(this.font, "Stock: OK/ ?/ X filter | T: town spawn | N: nation spawn (Enter to confirm)",
             left + 6, top + 288, 0xFFFFBD7A, false);
     }
 

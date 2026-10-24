@@ -46,6 +46,11 @@ jobs:
           javac -d build/parser-tests src/main/java/dev/earthmarket/SignShopParser.java tests/SignShopParserTest.java
           java -cp build/parser-tests dev.earthmarket.SignShopParserTest
 
+      - name: Check enchantment chat parsing
+        run: |
+          javac -encoding UTF-8 -d build/parser-tests src/main/java/dev/earthmarket/EnchantChatParser.java tests/EnchantChatParserTest.java
+          java -ea -cp build/parser-tests EnchantChatParserTest
+
       - name: Build Fabric mod
         run: gradle build --stacktrace --no-daemon
 

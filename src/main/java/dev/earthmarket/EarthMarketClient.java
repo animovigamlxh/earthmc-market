@@ -40,7 +40,12 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static int scanX, scanY, scanZ;
     private static boolean scanTargetExact;
     private static String scanFingerprint = "";
+    private static Quote lastInspectedShop;
+    private static final EnchantChatParser ENCHANT_CHAT = new EnchantChatParser();
+    private static long enchantCaptureDeadline = 0L;
+    private static Quote enchantCaptureShop;
     // Commands are submitted from ChatScreen; delay opening until it has closed.
+    private static boolean openArbitrageGui = false;
     private static int openGuiInTicks = -1;
     // Intentionally strict: no quote is created when type, price or quantity is ambiguous.
     private static final Pattern SHOP_LINE = Pattern.compile("(?i)(?:quickshop|shop)\\s*[:|]\\s*([a-z0-9_:.-]+)\\s+(BUY|SELL)\\s+(\\d+)\\s*(?:items?\\s*)?(?:for|@)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:g|gold)\\b");
@@ -49,6 +54,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         load();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             SIGNS.tick(client);
+            if (enchantCaptureShop != null && System.currentTimeMillis() > enchantCaptureDeadline) finishEnchantCapture();
             // Drain into resolver's deduplicated batch queue; HTTP requests are paced there.
             if (client.level != null) {
                 for (int i = 0; i < 80 && !SIGN_LOCATION_QUEUE.isEmpty(); i++) {
@@ -62,7 +68,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (openGuiInTicks < 0) return;
             if (openGuiInTicks-- > 0) return;
             openGuiInTicks = -1;
-            if (client.player != null) client.gui.setScreen(new MarketScreen());
+            if (client.player != null) client.gui.setScreen((openArbitrageGui ? new ArbitrageScreen() : new MarketScreen()));
         });
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
             literal("emprice")
@@ -91,6 +97,10 @@ public final class EarthMarketClient implements ClientModInitializer {
                     .then(argument("item", StringArgumentType.greedyString()).executes(ctx -> {
                         find(normalized(StringArgumentType.getString(ctx, "item"))); return 1;
                     })))
+                .then(literal("enchant")
+                    .then(argument("details", StringArgumentType.greedyString()).executes(ctx -> {
+                        setInspectedEnchants(StringArgumentType.getString(ctx, "details")); return 1;
+                    })))
                 .then(literal("scan").executes(ctx -> {
                     say(SIGNS.start(Minecraft.getInstance()) ? "Scanning nearby loaded signs (32 blocks horizontal, +/-12 vertical)..." : "Join a world first.");
                     return 1;
@@ -98,7 +108,8 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("autoscan")
                     .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s)."); return 1; }))
                     .then(literal("off").executes(ctx -> { SIGNS.setAuto(false); say("Auto sign scan OFF."); return 1; })))
-                .then(literal("gui").executes(ctx -> { openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
+                .then(literal("gui").executes(ctx -> { openArbitrageGui = false; openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
+                .then(literal("arbitrage").executes(ctx -> { openArbitrageGui = true; openGuiInTicks = 2; say("Opening arbitrage opportunities..."); return 1; }))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
                 .then(literal("recent").executes(ctx -> { recent(); return 1; }))
                 .then(literal("stats").executes(ctx -> { stats(); return 1; }))
@@ -107,11 +118,12 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | scan | autoscan <on|off> | recent | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | autoscan <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;
             inspectShopMessage(message.getString());
+            captureEnchantMessage(message.getString());
             Matcher match = SHOP_LINE.matcher(message.getString());
             if (!match.find()) return;
             var player = Minecraft.getInstance().player;
@@ -132,6 +144,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         boolean active = CHAT_SCAN.length() > 0 && System.currentTimeMillis() - scanStartedAt < 2500;
         if (!heading && !active) return;
         if (heading) {
+            finishEnchantCapture();
             CHAT_SCAN.setLength(0);
             scanFingerprint = "";
             scanStartedAt = System.currentTimeMillis();
@@ -170,9 +183,60 @@ public final class EarthMarketClient implements ClientModInitializer {
         q.available = result.available; q.status = result.state;
         q.source = "earthmc-quickshop"; q.updated = Instant.now().toString();
         q.locationAccuracy = scanTargetExact ? "target-block" : "player-approx";
-        upsert(q); save();
+        // Reinspection of the same QuickShop should retain manually captured metadata.
+        for (Quote old : QUOTES) {
+            if (!"earthmc-quickshop".equals(old.source) || !Objects.equals(old.shop, q.shop)
+                || !Objects.equals(old.type, q.type) || !Objects.equals(old.item, q.item)) continue;
+            if (old.x == q.x && old.y == q.y && old.z == q.z) { q.enchantments = old.enchantments; break; }
+        }
+        upsert(q); lastInspectedShop = q; save();
+        ENCHANT_CHAT.reset();
+        enchantCaptureShop = q;
+        enchantCaptureDeadline = System.currentTimeMillis() + 8000L;
         enrichLocation(q);
         say("Auto scanned: " + summary(q));
+    }
+
+    private static void captureEnchantMessage(String message) {
+        if (enchantCaptureShop == null) return;
+        if (System.currentTimeMillis() > enchantCaptureDeadline || !QUOTES.contains(enchantCaptureShop)) {
+            finishEnchantCapture(); return;
+        }
+        // Reject unrelated chatter until the explicit Enchantments header arrives.
+        if (!ENCHANT_CHAT.started() && !message.toLowerCase(Locale.ROOT).contains("enchantments")
+            && !message.contains("附魔列表") && !message.contains("附魔属性")) return;
+        if (ENCHANT_CHAT.accept(message) && ENCHANT_CHAT.hasEntries()) {
+            String details = ENCHANT_CHAT.details();
+            if (details.length() <= 600) {
+                enchantCaptureShop.enchantments = details;
+                enchantCaptureShop.updated = Instant.now().toString();
+                save();
+            }
+        }
+    }
+
+    private static void finishEnchantCapture() {
+        if (enchantCaptureShop != null && ENCHANT_CHAT.hasEntries()) {
+            say("Captured " + ENCHANT_CHAT.details() + " for " + enchantCaptureShop.item);
+        }
+        enchantCaptureShop = null;
+        enchantCaptureDeadline = 0L;
+        ENCHANT_CHAT.reset();
+    }
+
+    private static void setInspectedEnchants(String raw) {
+        if (lastInspectedShop == null || !QUOTES.contains(lastInspectedShop)) {
+            say("First left-click a QuickShop and wait for 'Auto scanned'."); return;
+        }
+        String details = raw.strip();
+        if (details.equalsIgnoreCase("clear")) details = "";
+        if (details.length() > 240 || details.codePoints().anyMatch(c -> Character.isISOControl(c))) {
+            say("Invalid enchantment text (max 240 characters)."); return;
+        }
+        lastInspectedShop.enchantments = details;
+        lastInspectedShop.updated = Instant.now().toString();
+        save();
+        say("Saved item details for " + lastInspectedShop.item + ": " + (details.isBlank() ? "(cleared)" : details));
     }
 
     private static void foundSign(BlockPos pos, NearbySignScanner.Found found) {
@@ -425,7 +489,12 @@ public final class EarthMarketClient implements ClientModInitializer {
     // Immutable read-only snapshots for the UI; never expose mutable database objects.
     public record DisplayQuote(String item, String type, String shop, double unitPrice,
                                double bundlePrice, int amount, Integer available, String status,
-                               String town, String nation, String updated, String accuracy, String source) {}
+                               String town, String nation, String updated, String accuracy, String source, String enchantments) {}
+
+    public static String variantLabel(DisplayQuote q) {
+        String suffix = q.enchantments() == null ? "" : q.enchantments().strip();
+        return suffix.isEmpty() ? q.item() : q.item() + " [" + suffix + "]";
+    }
 
     public static List<DisplayQuote> displayQuotes() {
         List<DisplayQuote> result = new ArrayList<>();
@@ -433,7 +502,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (!valid(q)) continue;
             result.add(new DisplayQuote(q.item, q.type, q.shop, q.price / q.amount,
                 q.price, q.amount, q.available, q.status, q.town, q.nation,
-                q.updated, q.locationAccuracy, q.source));
+                q.updated, q.locationAccuracy, q.source, q.enchantments));
         }
         return result;
     }
@@ -444,6 +513,6 @@ public final class EarthMarketClient implements ClientModInitializer {
         int amount, x, y, z;
         Integer available;
         String status;
-        String town, nation, locationStatus, locationAccuracy, signSide, dimension;
+        String town, nation, locationStatus, locationAccuracy, signSide, dimension, enchantments;
     }
 }

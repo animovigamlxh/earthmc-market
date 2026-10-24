@@ -161,3 +161,44 @@ QuickShop signs with `单价：27G` or `单价: 27G` now parse as 1 item for 27 
 
 ## v0.4.7
 Scan unavailable QuickShop signs labeled 缺货 or 空间不足, mark stock 0, and preserve historical price without treating the shop as tradable.
+
+
+## v0.4.8 GUI & arbitrage
+
+`/emprice gui`: Stock: ALL/OK/?/X filters. `Arbitrage` button opens `/emprice arbitrage`.
+The arbitrage page matches normalized item names between SELL (purchase) and BUY
+(resale) shops. It reports positive unit-price spreads and marks unverified
+stock. Confirmed opportunities require known stock > 0 on both sides;
+maximum units is the smaller known stock count. Amounts may represent
+shop trades or available quantities depending on data source; always verify.
+Results are estimates and exclude taxes, fees and travel costs.
+Travel buttons only prefill chat commands, never auto-send.
+
+## v0.4.9 — Enchantment notes for inspected QuickShops
+
+After left-clicking a QuickShop, wait for `Auto scanned`, then run
+`/emprice enchant 保护 IV, 耐久 III, 经验修补` to attach the
+enchantment details to **the last successfully inspected shop**.
+`/emprice enchant clear` clears the note for the last shop. The note is
+saved in `prices.json`, shown alongside the item in the market GUI, and
+used as part of the arbitrage matching key. Enchanted variants do not
+match items lacking the exact same note.
+
+The shop's chat text alone may not expose all enchantment NBT/components.
+This version does not claim to read them automatically; inspect the item
+preview and type its details. Re-inspecting the same shop preserves the note
+when its owner, item, trade type and observed coordinates match.
+Old notes are preserved in saved JSON. Do not keep two mod JAR versions.
+
+## v0.5.0 automatic enchantment capture
+
+Left-click a QuickShop sign. When the server sends its `Enchantments` section
+following the shop price, the client collects enchantment lines (e.g.
+`保护 IV`, `耐久 III`) for up to 8 seconds and writes them to `prices.json`
+under that inspected shop. In GUI the lines appear next to the item, and
+arbitrage comparisons use the enchantment details. The manual
+`/emprice enchant ...` command remains available as a fallback.
+
+If the server does not send an Enchantments section, no enchantment details
+are inferred. Only lines containing an enchantment name and level are
+automatically captured. GUI may truncate long summaries.
