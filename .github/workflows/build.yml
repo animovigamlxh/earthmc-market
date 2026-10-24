@@ -38,6 +38,12 @@ jobs:
           java -version
           gradle --version
 
+      - name: Check Chinese QuickShop parsing examples
+        run: |
+          mkdir -p build/parser-tests
+          javac -d build/parser-tests src/main/java/dev/earthmarket/QuickShopParser.java tests/QuickShopParserTest.java
+          java -cp build/parser-tests dev.earthmarket.QuickShopParserTest
+
       - name: Build Fabric mod
         run: gradle build --stacktrace --no-daemon
 

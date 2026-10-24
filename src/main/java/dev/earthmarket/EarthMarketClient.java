@@ -25,6 +25,10 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final Path DATABASE = DIRECTORY.resolve("prices.json");
     private static final Path IMPORT = DIRECTORY.resolve("import.json");
     private static final List<Quote> QUOTES = new ArrayList<>();
+    private static final StringBuilder CHAT_SCAN = new StringBuilder();
+    private static long scanStartedAt;
+    private static int scanX, scanY, scanZ;
+    private static String scanFingerprint = "";
     // Intentionally strict: no quote is created when type, price or quantity is ambiguous.
     private static final Pattern SHOP_LINE = Pattern.compile("(?i)(?:quickshop|shop)\\s*[:|]\\s*([a-z0-9_:.-]+)\\s+(BUY|SELL)\\s+(\\d+)\\s*(?:items?\\s*)?(?:for|@)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:g|gold)\\b");
 
@@ -58,11 +62,14 @@ public final class EarthMarketClient implements ClientModInitializer {
                         find(normalized(StringArgumentType.getString(ctx, "item"))); return 1;
                     })))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
+                .then(literal("recent").executes(ctx -> { recent(); return 1; }))
+                .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | recent | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;
+            inspectShopMessage(message.getString());
             Matcher match = SHOP_LINE.matcher(message.getString());
             if (!match.find()) return;
             var player = Minecraft.getInstance().player;
@@ -76,6 +83,40 @@ public final class EarthMarketClient implements ClientModInitializer {
         });
     }
 
+    private static void inspectShopMessage(String raw) {
+        String clean = raw.replaceAll("§[0-9a-fk-orA-FK-OR]", "");
+        // Only parse a clearly identified QuickShop info block, never arbitrary chat.
+        boolean heading = clean.contains("商店信息");
+        boolean active = CHAT_SCAN.length() > 0 && System.currentTimeMillis() - scanStartedAt < 2500;
+        if (!heading && !active) return;
+        if (heading) {
+            CHAT_SCAN.setLength(0);
+            scanFingerprint = "";
+            scanStartedAt = System.currentTimeMillis();
+            var player = Minecraft.getInstance().player;
+            if (player == null) return;
+            scanX = player.getBlockX(); scanY = player.getBlockY(); scanZ = player.getBlockZ();
+        }
+        if (CHAT_SCAN.length() > 5000) { CHAT_SCAN.setLength(0); return; }
+        CHAT_SCAN.append('\n').append(clean);
+        // Finalize only after both direction and full priced item appear in the block.
+        var result = QuickShopParser.parse(CHAT_SCAN.toString());
+        if (!result.complete()) return;
+        if (!Double.isFinite(result.gold) || result.amount > 1000000 || result.gold > 1e9) return;
+        String fingerprint = result.owner + '|' + result.item + '|' + result.type + '|' + result.amount
+            + '|' + result.gold + '|' + result.available + '|' + result.state;
+        if (fingerprint.equals(scanFingerprint)) return;
+        scanFingerprint = fingerprint;
+        Quote q = new Quote();
+        q.item = normalized(result.item); q.type = result.type;
+        q.amount = result.amount; q.price = result.gold;
+        q.shop = result.owner; q.x = scanX; q.y = scanY; q.z = scanZ;
+        q.available = result.available; q.status = result.state;
+        q.source = "earthmc-quickshop"; q.updated = Instant.now().toString();
+        upsert(q); save();
+        say("Auto scanned: " + summary(q));
+    }
+
     private static String normalized(String raw) {
         return raw.toLowerCase(Locale.ROOT).replace("minecraft:", "").replace('-', '_');
     }
@@ -86,9 +127,9 @@ public final class EarthMarketClient implements ClientModInitializer {
         say(item + " — " + entries.size() + " stored offers (not live stock):");
         entries.stream().sorted(Comparator.comparingDouble(q -> q.price / q.amount)).limit(12)
             .forEach(q -> say(summary(q)));
-        var cheapest = entries.stream().filter(q -> q.type.equals("sell"))
+        var cheapest = entries.stream().filter(q -> q.type.equals("sell") && tradeable(q))
             .min(Comparator.comparingDouble(q -> q.price / q.amount));
-        var highest = entries.stream().filter(q -> q.type.equals("buy"))
+        var highest = entries.stream().filter(q -> q.type.equals("buy") && tradeable(q))
             .max(Comparator.comparingDouble(q -> q.price / q.amount));
         if (cheapest.isPresent() && highest.isPresent()) {
             double spread = highest.get().price / highest.get().amount - cheapest.get().price / cheapest.get().amount;
@@ -96,9 +137,22 @@ public final class EarthMarketClient implements ClientModInitializer {
         }
     }
 
+    private static boolean tradeable(Quote q) {
+        return (q.available == null || q.available > 0)
+            && !"full".equals(q.status) && !"out-of-stock".equals(q.status)
+            && !"unavailable".equals(q.status);
+    }
+
+    private static void recent() {
+        say("Recent " + Math.min(8, QUOTES.size()) + " of " + QUOTES.size() + " saved observations:");
+        QUOTES.stream().sorted(Comparator.comparing(q -> q.updated == null ? "" : q.updated, Comparator.reverseOrder()))
+            .limit(8).forEach(q -> say(summary(q)));
+    }
+
     private static String summary(Quote q) {
-        return String.format(Locale.ROOT, "%s %s %.4fg/item [%.2fg/%d] %s (%d,%d,%d), %s %s",
-            q.item, q.type, q.price / q.amount, q.price, q.amount, q.shop, q.x, q.y, q.z, q.source, q.updated);
+        return String.format(Locale.ROOT, "%s %s %.4fg/item [%.2fg/%d] %s (%d,%d,%d) available=%s status=%s %s %s",
+            q.item, q.type, q.price / q.amount, q.price, q.amount, q.shop, q.x, q.y, q.z,
+            q.available == null ? "?" : q.available, q.status == null ? "unknown" : q.status, q.source, q.updated);
     }
 
     private static void upsert(Quote q) {
@@ -129,7 +183,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     private static boolean valid(Quote q) {
-        return q.item != null && q.item.matches("[a-zA-Z0-9_:.-]{1,100}")
+        return q.item != null && q.item.length() <= 100 && !q.item.isBlank()
             && q.type != null && (q.type.equalsIgnoreCase("sell") || q.type.equalsIgnoreCase("buy"))
             && q.shop != null && !q.shop.isBlank() && q.shop.length() <= 150
             && Double.isFinite(q.price) && q.price > 0 && q.amount > 0 && q.amount <= 1000000;
@@ -164,5 +218,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         String item, type, shop, source, updated;
         double price;
         int amount, x, y, z;
+        Integer available;
+        String status;
     }
 }

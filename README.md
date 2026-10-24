@@ -1,4 +1,4 @@
-# EarthMC Market Scanner — Fabric 26.2
+# EarthMC Market Scanner v0.2.0 — Fabric 26.2
 
 Experimental client-only price comparison mod. Does not require server installation.
 
@@ -7,6 +7,8 @@ Experimental client-only price comparison mod. Does not require server installat
 * `/emprice add <item> <buy|sell> <gold> <amount> <shop>` — record one observed quote at your current location. Here `sell` means shop sells to you; `buy` means shop buys from you.
 * `/emprice find <item>` — rank available quotes and show the best hypothetical arbitrage spread.
 * `/emprice import` — import a community export from `config/earthmc-market/import.json`.
+* `/emprice recent` — show the last eight observations, including automatic captures.
+* `/emprice reload` — reload the local JSON database without restarting Minecraft.
 * `/emprice clear` — remove all stored quotes (back up the config file first).
 
 All prices are normalized to gold per item, not gold per stack. Recorded offers are observations, **not** live stock or confirmed executable trades.
@@ -24,7 +26,11 @@ Import price means gold for `amount` items. Optional `source` can identify the p
 
 ## Automatic game observation
 
-The mod attempts to recognize clearly formatted QuickShop lines sent by the server to the client's *system chat*, requiring an explicit quantity, price and BUY/SELL trade direction. Recognized observations are stored with the current player position. Server-specific message variations may not match; no purchases or network scans are performed. Add quotes manually when necessary.
+Left-click an EarthMC QuickShop chest to request its information. The mod attempts to recognize the Chinese shop-info block from system chat, grouping owner, priced item, per-transaction amount, gold price, BUY/SELL direction, inventory/space and full/out-of-stock warnings. A simple English `QuickShop: ...` line is also recognized. Entries are stored with the player's **approximate position at inspection time**, not yet the precise chest block coordinate. No purchases or network scans are performed. Server-specific message variations may not match; add quotes manually when necessary.
+
+The `find` command excludes observed zero-stock or full shops when estimating potential arbitrage spreads. Other observations may have become stale: always confirm stock and price at the shop before trading. Enchanted books and variants are keyed by their displayed shop names (e.g. `风爆 I`), not merely `enchanted_book`.
+
+For debugging, open a shop and type `/emprice recent`. This version has **no GUI** and no automatic third-party site sync; use JSON import for contributed public data.
 
 ## Data
 
