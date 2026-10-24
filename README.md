@@ -83,3 +83,14 @@ because of an API outage. Only overworld Earth coords should be assumed to
 map to the EarthMC Towny claims; do not rely on the lookup in other dimensions.
 
 Town/nation fields are snapshots and can change as claims move.
+
+## v0.3.0 in-game GUI (first release)
+
+Use `/emprice gui` to open the searchable price screen. Search matches items, shop owners,
+towns and nations. The filter cycles ALL -> SELL -> BUY; Price toggles ascending / descending;
+Prev / Next pages through saved records. This is a **read-only** view of the existing local
+`config/earthmc-market/prices.json` database. No trades or travel commands are performed.
+
+Caveats: Price data is historical. City/Nation labels are only as reliable as the recorded
+coordinates and location API response. This first GUI is deliberately compact and does not yet
+include profitable-route ranking, live stock verification or interactive map markers.

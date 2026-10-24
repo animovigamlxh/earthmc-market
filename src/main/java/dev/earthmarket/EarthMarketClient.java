@@ -65,6 +65,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                     .then(argument("item", StringArgumentType.greedyString()).executes(ctx -> {
                         find(normalized(StringArgumentType.getString(ctx, "item"))); return 1;
                     })))
+                .then(literal("gui").executes(ctx -> { Minecraft.getInstance().gui.setScreen(new MarketScreen()); return 1; }))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
                 .then(literal("recent").executes(ctx -> { recent(); return 1; }))
                 .then(literal("stats").executes(ctx -> { stats(); return 1; }))
@@ -72,7 +73,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | recent | stats | locate | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | recent | stats | locate | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;
@@ -310,6 +311,22 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static void say(String message) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) mc.player.sendSystemMessage(Component.literal("[EM Market] " + message));
+    }
+
+    // Immutable read-only snapshots for the UI; never expose mutable database objects.
+    public record DisplayQuote(String item, String type, String shop, double unitPrice,
+                               double bundlePrice, int amount, Integer available, String status,
+                               String town, String nation, String updated, String accuracy, String source) {}
+
+    public static List<DisplayQuote> displayQuotes() {
+        List<DisplayQuote> result = new ArrayList<>();
+        for (Quote q : QUOTES) {
+            if (!valid(q)) continue;
+            result.add(new DisplayQuote(q.item, q.type, q.shop, q.price / q.amount,
+                q.price, q.amount, q.available, q.status, q.town, q.nation,
+                q.updated, q.locationAccuracy, q.source));
+        }
+        return result;
     }
 
     private static class Quote {
