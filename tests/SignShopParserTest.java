@@ -9,6 +9,10 @@ public final class SignShopParserTest {
         check(new String[]{"thebestlung", "出售 53", "远古残骸", "单价：4G"}, "sell", 1, 4);
         check(new String[]{"thebestlung", "收购 7", "远古残骸", "单价：3G"}, "buy", 1, 3);
         check(new String[]{"GrayWolf", "出售 4", "信标", "单价：7G"}, "sell", 1, 7);
+        var soldOut = SignShopParser.parse(new String[]{"Researcher_Ivan", "缺货", "雇主盔甲纹饰", "单价：90G"});
+        if (soldOut == null || !"sell".equals(soldOut.type()) || !"out-of-stock".equals(soldOut.state())) throw new AssertionError("sold out sign");
+        var fullBuy = SignShopParser.parse(new String[]{"Researcher_Ivan", "空间不足", "远古残骸", "单价：3G"});
+        if (fullBuy == null || !"buy".equals(fullBuy.type()) || !"full".equals(fullBuy.state())) throw new AssertionError("full buy sign");
         if (SignShopParser.parse(new String[]{"公告", "欢迎", "光临", "无价格"}) != null) throw new AssertionError("ordinary sign recognized");
         System.out.println("SignShopParser tests passed");
     }

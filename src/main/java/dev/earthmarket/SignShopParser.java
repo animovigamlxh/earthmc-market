@@ -6,10 +6,10 @@ import java.util.regex.Pattern;
 
 /** Conservative Chinese QuickShop sign parsing. No stock assertion from sign text. */
 public final class SignShopParser {
-    private static final Pattern DIRECTION = Pattern.compile("^(出售|收购|SELL|BUY)\\s*(?:\\d+)?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DIRECTION = Pattern.compile("^(出售|收购|SELL|BUY|缺货|空间不足)\\s*(?:\\d+)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern PRICE = Pattern.compile("^(?:每\\s*)?(\\d{1,6})\\s*(?:[xX×个件])?\\s*[,，:：]?\\s*(?:价格)?\\s*(\\d+(?:\\.\\d+)?)\\s*[Gg]$", Pattern.CASE_INSENSITIVE);
     private static final Pattern UNIT_PRICE = Pattern.compile("^单价\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?)\\s*[Gg]$", Pattern.CASE_INSENSITIVE);
-    public record Result(String owner, String type, String item, int amount, double gold) {}
+    public record Result(String owner, String type, String item, int amount, double gold, String state) {}
     private SignShopParser() {}
     public static Result parse(String[] lines) {
         if (lines == null || lines.length != 4) return null;
@@ -27,10 +27,15 @@ public final class SignShopParser {
             if (amount < 1 || amount > 100000 || !(gold > 0) || !Double.isFinite(gold) || gold > 1e9) return null;
             String type = switch (dir.group(1).toUpperCase(Locale.ROOT)) {
                 case "出售", "SELL" -> "sell";
-                case "收购", "BUY" -> "buy";
+                case "收购", "BUY", "空间不足" -> "buy";
+                case "缺货" -> "sell";
                 default -> null;
             };
-            return type == null ? null : new Result(owner, type, item, amount, gold);
+            return type == null ? null : new Result(owner, type, item, amount, gold, switch (dir.group(1)) {
+                case "缺货" -> "out-of-stock";
+                case "空间不足" -> "full";
+                default -> "sign-unverified";
+            });
         } catch (NumberFormatException e) { return null; }
     }
     private static String trim(String input) {

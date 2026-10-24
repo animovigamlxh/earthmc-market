@@ -158,3 +158,6 @@ rebuilding the database.
 
 ## v0.4.6 sign unit-price fix
 QuickShop signs with `单价：27G` or `单价: 27G` now parse as 1 item for 27 gold, alongside prior `每64x 1G` signs. Includes regression test cases for ancient debris and netherite equipment.
+
+## v0.4.7
+Scan unavailable QuickShop signs labeled 缺货 or 空间不足, mark stock 0, and preserve historical price without treating the shop as tradable.

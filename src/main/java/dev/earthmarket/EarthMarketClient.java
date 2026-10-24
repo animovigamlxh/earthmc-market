@@ -189,14 +189,16 @@ public final class EarthMarketClient implements ClientModInitializer {
             matched = old;
             if (Objects.equals(old.item, item) && Objects.equals(old.type, p.type())
                 && Objects.equals(old.shop, p.owner()) && old.price == p.gold()
-                && old.amount == p.amount()) return;
+                && old.amount == p.amount()
+                && Objects.equals(old.status, p.state())) return;
             break;
         }
         Quote q = new Quote();
         q.item = item; q.type = p.type(); q.shop = p.owner(); q.amount = p.amount(); q.price = p.gold();
         q.x = pos.getX(); q.y = pos.getY(); q.z = pos.getZ(); q.signSide = found.side();
         q.dimension = dimension;
-        q.status = found.redOwner() ? "sign-red-unverified" : "sign-unverified";
+        q.status = !"sign-unverified".equals(p.state()) ? p.state() : (found.redOwner() ? "sign-red-unverified" : "sign-unverified");
+        if ("out-of-stock".equals(q.status) || "full".equals(q.status)) q.available = 0;
         q.source = "earthmc-sign"; q.locationAccuracy = "sign-block"; q.updated = Instant.now().toString();
         // Preserve completed API location lookups across price edits.
         if (matched != null) {
