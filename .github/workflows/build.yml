@@ -43,6 +43,8 @@ jobs:
           mkdir -p build/parser-tests
           javac -d build/parser-tests src/main/java/dev/earthmarket/QuickShopParser.java tests/QuickShopParserTest.java
           java -cp build/parser-tests dev.earthmarket.QuickShopParserTest
+          javac -d build/parser-tests src/main/java/dev/earthmarket/SignShopParser.java tests/SignShopParserTest.java
+          java -cp build/parser-tests dev.earthmarket.SignShopParserTest
 
       - name: Build Fabric mod
         run: gradle build --stacktrace --no-daemon

@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
@@ -29,6 +30,11 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final Path IMPORT = DIRECTORY.resolve("import.json");
     private static final Path BACKUP = DIRECTORY.resolve("prices-backup.json");
     private static final List<Quote> QUOTES = new ArrayList<>();
+    private static final NearbySignScanner SIGNS = new NearbySignScanner(EarthMarketClient::foundSign);
+    private static long lastSignLookupAt = 0;
+    private static long lastSignSaveAt = 0;
+    private static boolean signDirty = false;
+    private static final Deque<Quote> SIGN_LOCATION_QUEUE = new ArrayDeque<>();
     private static final StringBuilder CHAT_SCAN = new StringBuilder();
     private static long scanStartedAt;
     private static int scanX, scanY, scanZ;
@@ -42,6 +48,15 @@ public final class EarthMarketClient implements ClientModInitializer {
     @Override public void onInitializeClient() {
         load();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            SIGNS.tick(client);
+            if (client.level != null && !SIGN_LOCATION_QUEUE.isEmpty() && System.currentTimeMillis() - lastSignLookupAt >= 1500L) {
+                lastSignLookupAt = System.currentTimeMillis();
+                Quote queued = SIGN_LOCATION_QUEUE.pollFirst();
+                if (QUOTES.contains(queued)) resolveSignLocation(queued);
+            }
+            if (signDirty && System.currentTimeMillis() - lastSignSaveAt > 2000L) {
+                signDirty = false; lastSignSaveAt = System.currentTimeMillis(); save();
+            }
             if (openGuiInTicks < 0) return;
             if (openGuiInTicks-- > 0) return;
             openGuiInTicks = -1;
@@ -74,6 +89,13 @@ public final class EarthMarketClient implements ClientModInitializer {
                     .then(argument("item", StringArgumentType.greedyString()).executes(ctx -> {
                         find(normalized(StringArgumentType.getString(ctx, "item"))); return 1;
                     })))
+                .then(literal("scan").executes(ctx -> {
+                    say(SIGNS.start(Minecraft.getInstance()) ? "Scanning nearby loaded signs (32 blocks horizontal, +/-12 vertical)..." : "Join a world first.");
+                    return 1;
+                }))
+                .then(literal("autoscan")
+                    .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s)."); return 1; }))
+                    .then(literal("off").executes(ctx -> { SIGNS.setAuto(false); say("Auto sign scan OFF."); return 1; })))
                 .then(literal("gui").executes(ctx -> { openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
                 .then(literal("recent").executes(ctx -> { recent(); return 1; }))
@@ -82,7 +104,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | recent | stats | locate | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | scan | autoscan <on|off> | recent | stats | locate | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;
@@ -150,6 +172,38 @@ public final class EarthMarketClient implements ClientModInitializer {
         say("Auto scanned: " + summary(q));
     }
 
+    private static void foundSign(BlockPos pos, NearbySignScanner.Found found) {
+        var p = found.quote();
+        String item = normalized(p.item());
+        for (Quote old : QUOTES) {
+            if (!"earthmc-sign".equals(old.source) || old.x != pos.getX() || old.y != pos.getY() || old.z != pos.getZ()
+                || !Objects.equals(old.signSide, found.side())) continue;
+            if (Objects.equals(old.item, item) && Objects.equals(old.type, p.type())
+                && Objects.equals(old.shop, p.owner()) && old.price == p.gold() && old.amount == p.amount()) return;
+        }
+        Quote q = new Quote();
+        q.item = item; q.type = p.type(); q.shop = p.owner(); q.amount = p.amount(); q.price = p.gold();
+        q.x = pos.getX(); q.y = pos.getY(); q.z = pos.getZ(); q.signSide = found.side();
+        q.status = found.redOwner() ? "sign-red-unverified" : "sign-unverified";
+        q.source = "earthmc-sign"; q.locationAccuracy = "sign-block"; q.updated = Instant.now().toString();
+        QUOTES.removeIf(old -> "earthmc-sign".equals(old.source) && old.x == q.x && old.y == q.y && old.z == q.z
+            && Objects.equals(old.signSide, q.signSide));
+        upsert(q); signDirty = true;
+        // Queue lookups, max one every 1.5s. Avoid bursts against EarthMC API.
+        SIGN_LOCATION_QUEUE.addLast(q);
+    }
+
+    private static void resolveSignLocation(Quote q) {
+        EarthLocationResolver.resolve(q.x, q.z, result -> Minecraft.getInstance().execute(() -> {
+            if (!QUOTES.contains(q)) return;
+            if (result.ok()) {
+                q.town = result.town(); q.nation = result.nation();
+                q.locationStatus = result.wilderness() ? "wilderness" : "confirmed";
+                save();
+            } else q.locationStatus = "api-failed";
+        }));
+    }
+
     private static void enrichLocation(Quote q) {
         if (!"earthmc-quickshop".equals(q.source)) return;
         EarthLocationResolver.resolve(q.x, q.z, result -> Minecraft.getInstance().execute(() -> {
@@ -170,10 +224,10 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static void locateUnknown() {
         int count = 0;
         for (Quote q : QUOTES) {
-            if (!"earthmc-quickshop".equals(q.source)) continue;
+            if (!"earthmc-quickshop".equals(q.source) && !"earthmc-sign".equals(q.source)) continue;
             if ("confirmed".equals(q.locationStatus) || "wilderness".equals(q.locationStatus)) continue;
             if (count >= 10) break;
-            enrichLocation(q); count++;
+            if ("earthmc-sign".equals(q.source)) resolveSignLocation(q); else enrichLocation(q); count++;
         }
         say("Requested location lookups for " + count + " saved shops (max 10 per command).");
     }
@@ -215,7 +269,8 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static boolean tradeable(Quote q) {
         return (q.available == null || q.available > 0)
             && !"full".equals(q.status) && !"out-of-stock".equals(q.status)
-            && !"unavailable".equals(q.status);
+            && !"unavailable".equals(q.status)
+            && !"sign-red-unverified".equals(q.status) && !"sign-unverified".equals(q.status);
     }
 
     private static void recent() {
@@ -344,6 +399,6 @@ public final class EarthMarketClient implements ClientModInitializer {
         int amount, x, y, z;
         Integer available;
         String status;
-        String town, nation, locationStatus, locationAccuracy;
+        String town, nation, locationStatus, locationAccuracy, signSide;
     }
 }

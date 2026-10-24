@@ -97,3 +97,14 @@ include profitable-route ranking, live stock verification or interactive map mar
 
 ## v0.3.1 GUI fix
 `/emprice gui` queues the screen opening for a later client tick, after Minecraft closes its chat input. If the GUI does not appear, check for the `Opening Market GUI...` message and ensure exactly one EarthMC Market JAR is installed.
+
+## v0.4.0 — Read-only local sign scanning
+
+- `/emprice scan` searches a 32-block horizontal radius and ±12 blocks vertically around the player, only in already-loaded chunks. The search is spread across ticks rather than freezing the client.
+- `/emprice autoscan on` repeats the search every 30 seconds. `/emprice autoscan off` disables it (it does not cancel an already-started pass).
+- Signs must match four lines: owner, `出售`/`收购` and optional numeric suffix, item name, and `每64x 1G` or similar.
+- Scan source is `earthmc-sign`; availability is `sign-unverified` or `sign-red-unverified`, **not** verified stock. These offers are deliberately excluded from guaranteed-positive-spread calculations until checked by left click.
+- Deduplication uses block X/Y/Z plus text side. Existing QuickShop click-based scanning and GUI still work.
+- Sign location uses exact sign block coordinates. Location lookups are throttled to one every 1.5 seconds; lots of sign records can take some time to enrich. `/emprice locate` can retry unresolved records.
+- This scanner does **not** click chests/signs, issue transactions, request remote chunks, or read server-side unseen data. A plugin creating virtual sign text rather than synced sign block entities may not be discovered by this approach.
+- `autoscan` setting is intentionally session-only in v0.4.0. Switch it on after joining the server.
