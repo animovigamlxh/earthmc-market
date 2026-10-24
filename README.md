@@ -155,3 +155,6 @@ Existing records that were previously overwritten cannot be recovered from
 the saved database; rescan affected towns. Pre-v0.4.5 saved records have no
 dimension field, so they may remain as legacy entries; create a backup before
 rebuilding the database.
+
+## v0.4.6 sign unit-price fix
+QuickShop signs with `单价：27G` or `单价: 27G` now parse as 1 item for 27 gold, alongside prior `每64x 1G` signs. Includes regression test cases for ancient debris and netherite equipment.
