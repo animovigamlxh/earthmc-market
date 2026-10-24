@@ -7,6 +7,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.BlockHitResult;
@@ -33,11 +34,19 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static int scanX, scanY, scanZ;
     private static boolean scanTargetExact;
     private static String scanFingerprint = "";
+    // Commands are submitted from ChatScreen; delay opening until it has closed.
+    private static int openGuiInTicks = -1;
     // Intentionally strict: no quote is created when type, price or quantity is ambiguous.
     private static final Pattern SHOP_LINE = Pattern.compile("(?i)(?:quickshop|shop)\\s*[:|]\\s*([a-z0-9_:.-]+)\\s+(BUY|SELL)\\s+(\\d+)\\s*(?:items?\\s*)?(?:for|@)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:g|gold)\\b");
 
     @Override public void onInitializeClient() {
         load();
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (openGuiInTicks < 0) return;
+            if (openGuiInTicks-- > 0) return;
+            openGuiInTicks = -1;
+            if (client.player != null) client.gui.setScreen(new MarketScreen());
+        });
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
             literal("emprice")
                 .then(literal("add")
@@ -65,7 +74,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                     .then(argument("item", StringArgumentType.greedyString()).executes(ctx -> {
                         find(normalized(StringArgumentType.getString(ctx, "item"))); return 1;
                     })))
-                .then(literal("gui").executes(ctx -> { Minecraft.getInstance().gui.setScreen(new MarketScreen()); return 1; }))
+                .then(literal("gui").executes(ctx -> { openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
                 .then(literal("recent").executes(ctx -> { recent(); return 1; }))
                 .then(literal("stats").executes(ctx -> { stats(); return 1; }))

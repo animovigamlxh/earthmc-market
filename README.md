@@ -94,3 +94,6 @@ Prev / Next pages through saved records. This is a **read-only** view of the exi
 Caveats: Price data is historical. City/Nation labels are only as reliable as the recorded
 coordinates and location API response. This first GUI is deliberately compact and does not yet
 include profitable-route ranking, live stock verification or interactive map markers.
+
+## v0.3.1 GUI fix
+`/emprice gui` queues the screen opening for a later client tick, after Minecraft closes its chat input. If the GUI does not appear, check for the `Opening Market GUI...` message and ensure exactly one EarthMC Market JAR is installed.
