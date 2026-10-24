@@ -11,13 +11,17 @@ import java.util.function.BiConsumer;
 
 /** Incremental, read-only scanner. It does not interact with shop blocks or send packets. */
 public final class NearbySignScanner {
-    private static final int RADIUS = 32, VERTICAL = 12, POSITIONS_PER_TICK = 2400;
+    private static final int RADIUS = 32, VERTICAL = 12;
+    private static final int CHUNKS_PER_TICK = 1;
+    private static final int SIGNS_PER_TICK = 48;
     private static final long AUTO_INTERVAL_MS = 30_000;
     private final BiConsumer<BlockPos, Found> onFound;
     private boolean auto = false, active = false;
-    private int centerX, centerY, centerZ, cursor, candidates, recognized;
+    private int centerX, centerY, centerZ, chunkCursor, signCursor, candidates, recognized;
+    private int minChunkX, maxChunkX, minChunkZ, maxChunkZ;
     private long lastAutomaticAt;
     private String dimensionKey = "";
+    private final java.util.ArrayList<java.util.Map.Entry<BlockPos, BlockEntity>> pending = new java.util.ArrayList<>();
 
     public record Found(SignShopParser.Result quote, boolean redOwner, String side) {}
     public NearbySignScanner(BiConsumer<BlockPos, Found> onFound) { this.onFound = onFound; }
@@ -29,37 +33,55 @@ public final class NearbySignScanner {
         if (mc.player == null || mc.level == null) return false;
         centerX = mc.player.getBlockX(); centerY = mc.player.getBlockY(); centerZ = mc.player.getBlockZ();
         dimensionKey = mc.level.dimension().toString();
-        cursor = 0; candidates = 0; recognized = 0; active = true;
+        minChunkX = Math.floorDiv(centerX - RADIUS, 16);
+        maxChunkX = Math.floorDiv(centerX + RADIUS, 16);
+        minChunkZ = Math.floorDiv(centerZ - RADIUS, 16);
+        maxChunkZ = Math.floorDiv(centerZ + RADIUS, 16);
+        chunkCursor = 0; signCursor = 0; pending.clear();
+        candidates = 0; recognized = 0; active = true;
         lastAutomaticAt = System.currentTimeMillis();
         return true;
     }
 
     public void tick(Minecraft mc) {
-        if (mc.player == null || mc.level == null) { active = false; return; }
-        if (active && !dimensionKey.equals(mc.level.dimension().toString())) active = false;
+        if (mc.player == null || mc.level == null) { active = false; pending.clear(); return; }
+        if (active && !dimensionKey.equals(mc.level.dimension().toString())) { active = false; pending.clear(); }
         if (!active) {
             if (auto && System.currentTimeMillis() - lastAutomaticAt >= AUTO_INTERVAL_MS) start(mc);
             return;
         }
-        int width = RADIUS * 2 + 1, height = VERTICAL * 2 + 1;
-        int total = width * width * height;
-        int processed = 0;
-        while (cursor < total && processed++ < POSITIONS_PER_TICK) {
-            int at = cursor++;
-            int x = centerX + at % width - RADIUS;
-            int z = centerZ + (at / width) % width - RADIUS;
-            int y = centerY + at / (width * width) - VERTICAL;
-            BlockPos pos = new BlockPos(x, y, z);
-            if (!mc.level.hasChunkAt(pos)) continue;
-            BlockEntity entity = mc.level.getBlockEntity(pos);
-            if (!(entity instanceof SignBlockEntity sign)) continue;
-            candidates++;
+        int chunkWidth = maxChunkX - minChunkX + 1;
+        int totalChunks = chunkWidth * (maxChunkZ - minChunkZ + 1);
+        int signsDone = 0, chunksDone = 0;
+        while (signsDone < SIGNS_PER_TICK) {
+            if (signCursor >= pending.size()) {
+                pending.clear(); signCursor = 0;
+                if (chunkCursor >= totalChunks || chunksDone >= CHUNKS_PER_TICK) break;
+                int index = chunkCursor++;
+                int cx = minChunkX + index % chunkWidth;
+                int cz = minChunkZ + index / chunkWidth;
+                chunksDone++;
+                BlockPos check = new BlockPos(cx * 16, centerY, cz * 16);
+                if (!mc.level.hasChunkAt(check)) continue;
+                // Copy the map entries before processing. Never mutate chunk internals.
+                for (var entry : mc.level.getChunk(cx, cz).getBlockEntities().entrySet()) {
+                    if (entry.getValue() instanceof SignBlockEntity) pending.add(entry);
+                }
+                continue;
+            }
+            var entry = pending.get(signCursor++);
+            BlockPos pos = entry.getKey();
+            if (Math.abs(pos.getX() - centerX) > RADIUS || Math.abs(pos.getZ() - centerZ) > RADIUS
+                || Math.abs(pos.getY() - centerY) > VERTICAL) continue;
+            if (!(entry.getValue() instanceof SignBlockEntity sign)) continue;
+            candidates++; signsDone++;
             scanSide(pos, sign.getFrontText(), "front");
             scanSide(pos, sign.getBackText(), "back");
         }
-        if (cursor >= total) {
-            active = false;
-            if (mc.player != null) mc.player.sendSystemMessage(Component.literal("[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized. Price/stock may be stale."));
+        if (chunkCursor >= totalChunks && signCursor >= pending.size()) {
+            active = false; pending.clear();
+            if (mc.player != null) mc.player.sendSystemMessage(Component.literal(
+                "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized. Price/stock may be stale."));
         }
     }
     private void scanSide(BlockPos pos, SignText text, String side) {

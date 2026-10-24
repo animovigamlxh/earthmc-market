@@ -54,12 +54,9 @@ public final class ArbitrageScreen extends Screen {
             && s.codePoints().noneMatch(c->Character.isISOControl(c) || Character.isWhitespace(c));
     }
     private void travel(int i, boolean toBuy) {
-        Opportunity o=current[i]; if(o==null)return;
-        var q=toBuy?o.ask:o.bid;
-        String name=destinationOk(q.town())?q.town():destinationOk(q.nation())?q.nation():null;
-        if(name==null) return;
-        String cmd=destinationOk(q.town())?"/t spawn "+name:"/n spawn "+name;
-        minecraft.gui.setScreen(new ChatScreen(cmd,false));
+        Opportunity o = current[i]; if (o == null) return;
+        var q = toBuy ? o.ask : o.bid;
+        CapitalTravelResolver.prepare(minecraft, q.town(), q.nation());
     }
     private void update() {
         if(search==null) return;
@@ -100,8 +97,8 @@ public final class ArbitrageScreen extends Screen {
             current[i]=page*PER_PAGE+i<results.size()?results.get(page*PER_PAGE+i):null;
             boolean active=current[i]!=null;
             buyTown[i].visible=active;sellTown[i].visible=active;
-            buyTown[i].active=active&&(destinationOk(current[i].ask.town())||destinationOk(current[i].ask.nation()));
-            sellTown[i].active=active&&(destinationOk(current[i].bid.town())||destinationOk(current[i].bid.nation()));
+            buyTown[i].active=active&&destinationOk(current[i].ask.town());
+            sellTown[i].active=active&&destinationOk(current[i].bid.town());
         }
     }
     private static String shortName(String s,int max){s=safe(s);return s.length()<=max?s:s.substring(0,max-1)+"…";}

@@ -29,6 +29,7 @@ public final class MarketScreen extends Screen {
     private Button direction;
     private Button type;
     private final EarthMarketClient.DisplayQuote[] rowQuotes = new EarthMarketClient.DisplayQuote[PAGE_SIZE];
+    private final Button[] locateButtons = new Button[PAGE_SIZE];
     private final Button[] townButtons = new Button[PAGE_SIZE];
     private final Button[] nationButtons = new Button[PAGE_SIZE];
 
@@ -72,24 +73,28 @@ public final class MarketScreen extends Screen {
         for (int i = 0; i < PAGE_SIZE; i++) {
             final int row = i;
             int y = top + 70 + i * 25;
-            townButtons[i] = addRenderableWidget(Button.builder(Component.literal("T"), b -> openTravel(row, true))
+            locateButtons[i] = addRenderableWidget(Button.builder(Component.literal("H"), b -> highlight(row))
+                .bounds(left + 486, y, 18, 20).build());
+            townButtons[i] = addRenderableWidget(Button.builder(Component.literal("Go"), b -> openTravel(row, true))
                 .bounds(left + 508, y, 18, 20).build());
-            nationButtons[i] = addRenderableWidget(Button.builder(Component.literal("N"), b -> openTravel(row, false))
+            nationButtons[i] = addRenderableWidget(Button.builder(Component.literal("?"), b -> openTravel(row, false))
                 .bounds(left + 529, y, 18, 20).build());
         }
         refresh();
     }
 
-    /** Only prefills the command. The player presses Enter to send it. */
-    private void openTravel(int row, boolean townMode) {
+    private void highlight(int row) {
         EarthMarketClient.DisplayQuote q = rowQuotes[row];
         if (q == null) return;
-        String destination = townMode ? safe(q.town()).strip() : safe(q.nation()).strip();
-        if (destination.isBlank() || destination.equalsIgnoreCase("unknown") || destination.startsWith("(")) return;
-        // Disallow control characters and chat-injection whitespace in external API names.
-        if (destination.codePoints().anyMatch(c -> Character.isISOControl(c) || Character.isWhitespace(c))) return;
-        String command = (townMode ? "/t spawn " : "/n spawn ") + destination;
-        this.minecraft.gui.setScreen(new ChatScreen(command, false));
+        this.minecraft.gui.setScreen(null);
+        EarthMarketClient.locateShop(q);
+    }
+
+    /** Automatic capital-aware chat draft; player still presses Enter. */
+    private void openTravel(int row, boolean ignored) {
+        EarthMarketClient.DisplayQuote q = rowQuotes[row];
+        if (q == null) return;
+        CapitalTravelResolver.prepare(this.minecraft, q.town(), q.nation());
     }
 
     private void refresh() {
@@ -119,12 +124,17 @@ public final class MarketScreen extends Screen {
             int rowIndex = page * PAGE_SIZE + i;
             EarthMarketClient.DisplayQuote q = rowIndex < visible.size() ? visible.get(rowIndex) : null;
             rowQuotes[i] = q;
+            if (locateButtons[i] != null) {
+                locateButtons[i].visible = q != null;
+                locateButtons[i].active = q != null && ("earthmc-sign".equals(q.source()) || "target-block".equals(q.accuracy()))
+                    && q.dimension() != null;
+            }
             if (townButtons[i] != null) {
                 townButtons[i].visible = q != null;
                 townButtons[i].active = q != null && validDestination(q.town());
             }
             if (nationButtons[i] != null) {
-                nationButtons[i].visible = q != null;
+                nationButtons[i].visible = false;
                 nationButtons[i].active = q != null && validDestination(q.nation());
             }
         }
@@ -193,7 +203,7 @@ public final class MarketScreen extends Screen {
         int pages = Math.max(1, (visible.size() + PAGE_SIZE - 1) / PAGE_SIZE);
         graphics.text(this.font, "Records: " + visible.size() + "   Page " + (page + 1) + "/" + pages,
             left + 6, top + 278, 0xFFE0E4EA, false);
-        graphics.text(this.font, "Stock: OK/ ?/ X filter | T: town spawn | N: nation spawn (Enter to confirm)",
+        graphics.text(this.font, "H: flash nearby shop box | T: town spawn | N: nation spawn (Enter to confirm)",
             left + 6, top + 288, 0xFFFFBD7A, false);
     }
 

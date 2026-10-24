@@ -54,15 +54,16 @@ public final class EarthMarketClient implements ClientModInitializer {
         load();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             SIGNS.tick(client);
+            ShopLocator.tick(client);
             if (enchantCaptureShop != null && System.currentTimeMillis() > enchantCaptureDeadline) finishEnchantCapture();
             // Drain into resolver's deduplicated batch queue; HTTP requests are paced there.
             if (client.level != null) {
-                for (int i = 0; i < 80 && !SIGN_LOCATION_QUEUE.isEmpty(); i++) {
+                for (int i = 0; i < 20 && !SIGN_LOCATION_QUEUE.isEmpty(); i++) {
                     Quote queued = SIGN_LOCATION_QUEUE.pollFirst();
                     if (QUOTES.contains(queued)) resolveSignLocation(queued);
                 }
             }
-            if (signDirty && System.currentTimeMillis() - lastSignSaveAt > 2000L) {
+            if (signDirty && System.currentTimeMillis() - lastSignSaveAt > 5000L) {
                 signDirty = false; lastSignSaveAt = System.currentTimeMillis(); save();
             }
             if (openGuiInTicks < 0) return;
@@ -189,7 +190,12 @@ public final class EarthMarketClient implements ClientModInitializer {
                 || !Objects.equals(old.type, q.type) || !Objects.equals(old.item, q.item)) continue;
             if (old.x == q.x && old.y == q.y && old.z == q.z) { q.enchantments = old.enchantments; break; }
         }
-        upsert(q); lastInspectedShop = q; save();
+        // If this inspection refers to a nearby physical sign, refresh that sign entry
+        // instead of storing a competing QuickShop quote with stale sign stock.
+        Quote joined = reconcileInspectionWithSign(q);
+        if (joined != null) q = joined;
+        else upsert(q);
+        lastInspectedShop = q; save();
         ENCHANT_CHAT.reset();
         enchantCaptureShop = q;
         enchantCaptureDeadline = System.currentTimeMillis() + 8000L;
@@ -239,6 +245,37 @@ public final class EarthMarketClient implements ClientModInitializer {
         say("Saved item details for " + lastInspectedShop.item + ": " + (details.isBlank() ? "(cleared)" : details));
     }
 
+    /** Link a left-click inspection to an existing sign only if its identity is unambiguous. */
+    private static Quote reconcileInspectionWithSign(Quote inspected) {
+        var level = Minecraft.getInstance().level;
+        String dim = level == null ? null : level.dimension().toString();
+        Quote candidate = null;
+        int bestDistance = Integer.MAX_VALUE;
+        boolean ambiguous = false;
+        for (Quote old : QUOTES) {
+            if (!"earthmc-sign".equals(old.source) || !Objects.equals(old.dimension, dim)
+                || !Objects.equals(old.shop, inspected.shop) || !Objects.equals(old.type, inspected.type)
+                || !Objects.equals(old.item, inspected.item)) continue;
+            // Prefer exact sign block, then nearest signs within 4 blocks of the targeted block.
+            int dx = old.x - inspected.x, dy = old.y - inspected.y, dz = old.z - inspected.z;
+            int dist = dx * dx + dy * dy + dz * dz;
+            if (dist > 16) continue;
+            if (dist < bestDistance) { candidate = old; bestDistance = dist; ambiguous = false; }
+            else if (dist == bestDistance) ambiguous = true;
+        }
+        if (candidate == null || ambiguous) return null;
+        // A sign may display stale price while QuickShop provides current price and inventory.
+        candidate.price = inspected.price;
+        candidate.amount = inspected.amount;
+        candidate.available = inspected.available;
+        candidate.status = inspected.status;
+        candidate.stockVerifiedAt = inspected.updated;
+        candidate.updated = inspected.updated;
+        if (candidate.enchantments == null || candidate.enchantments.isBlank())
+            candidate.enchantments = inspected.enchantments;
+        return candidate;
+    }
+
     private static void foundSign(BlockPos pos, NearbySignScanner.Found found) {
         var p = found.quote();
         String item = normalized(p.item());
@@ -251,24 +288,66 @@ public final class EarthMarketClient implements ClientModInitializer {
                 || !Objects.equals(old.signSide, found.side())
                 || !Objects.equals(old.dimension, dimension)) continue;
             matched = old;
-            if (Objects.equals(old.item, item) && Objects.equals(old.type, p.type())
-                && Objects.equals(old.shop, p.owner()) && old.price == p.gold()
-                && old.amount == p.amount()
-                && Objects.equals(old.status, p.state())) return;
             break;
+        }
+        String signStatus = !"sign-unverified".equals(p.state()) ? p.state()
+            : (found.redOwner() ? "sign-red-unverified" : "sign-unverified");
+        boolean unavailable = "out-of-stock".equals(signStatus) || "full".equals(signStatus);
+        if (matched != null) {
+            boolean sameShop = Objects.equals(matched.item, item)
+                && Objects.equals(matched.type, p.type()) && Objects.equals(matched.shop, p.owner());
+            boolean samePrice = matched.price == p.gold() && matched.amount == p.amount();
+            boolean wasUnavailable = "out-of-stock".equals(matched.status) || "full".equals(matched.status);
+            boolean changed = !sameShop || !samePrice || unavailable != wasUnavailable;
+            // Signs never carry a live stock count. Keep positively inspected stock only
+            // while the sign still identifies the same shop and same advertised price.
+            if (!sameShop || !samePrice) {
+                matched.available = null;
+                matched.stockVerifiedAt = null;
+                matched.enchantments = sameShop ? matched.enchantments : null;
+            }
+            if (unavailable) {
+                matched.available = 0;
+                matched.stockVerifiedAt = null;
+                matched.status = signStatus;
+            } else if (wasUnavailable) {
+                matched.available = null; // Stock recovered, but actual amount unknown.
+                matched.stockVerifiedAt = null;
+                matched.status = "sign-unverified";
+            } else if (matched.stockVerifiedAt == null) {
+                matched.status = signStatus;
+            }
+            matched.item = item; matched.type = p.type(); matched.shop = p.owner();
+            matched.price = p.gold(); matched.amount = p.amount();
+            if (changed) { matched.updated = Instant.now().toString(); signDirty = true; }
+            return;
         }
         Quote q = new Quote();
         q.item = item; q.type = p.type(); q.shop = p.owner(); q.amount = p.amount(); q.price = p.gold();
         q.x = pos.getX(); q.y = pos.getY(); q.z = pos.getZ(); q.signSide = found.side();
-        q.dimension = dimension;
-        q.status = !"sign-unverified".equals(p.state()) ? p.state() : (found.redOwner() ? "sign-red-unverified" : "sign-unverified");
-        if ("out-of-stock".equals(q.status) || "full".equals(q.status)) q.available = 0;
-        q.source = "earthmc-sign"; q.locationAccuracy = "sign-block"; q.updated = Instant.now().toString();
-        // Preserve completed API location lookups across price edits.
-        if (matched != null) {
-            q.town = matched.town; q.nation = matched.nation;
-            q.locationStatus = matched.locationStatus;
-            QUOTES.remove(matched);
+        q.dimension = dimension; q.status = signStatus;
+        if (unavailable) q.available = 0;
+        q.source = "earthmc-sign"; q.locationAccuracy = "sign-block";
+        q.updated = Instant.now().toString();
+        // Merge an earlier approximate QuickShop inspection when it unambiguously belongs here.
+        Quote prior = null;
+        for (Quote old : QUOTES) {
+            if (!"earthmc-quickshop".equals(old.source)
+                || !Objects.equals(old.shop, q.shop) || !Objects.equals(old.type, q.type)
+                || !Objects.equals(old.item, q.item)) continue;
+            int dx = old.x-q.x, dy=old.y-q.y, dz=old.z-q.z;
+            if (dx*dx+dy*dy+dz*dz > 16) continue;
+            if (prior != null) { prior = null; break; } // Don't merge ambiguous neighbors.
+            prior = old;
+        }
+        if (prior != null) {
+            q.enchantments = prior.enchantments;
+            if (!unavailable && prior.price == q.price && prior.amount == q.amount) {
+                q.available = prior.available;
+                q.status = prior.status;
+                q.stockVerifiedAt = prior.stockVerifiedAt == null ? prior.updated : prior.stockVerifiedAt;
+            }
+            QUOTES.remove(prior);
         }
         upsert(q); signDirty = true;
         if (!"confirmed".equals(q.locationStatus) && !"wilderness".equals(q.locationStatus)) {
@@ -282,8 +361,8 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (result.ok()) {
                 q.town = result.town(); q.nation = result.nation();
                 q.locationStatus = result.wilderness() ? "wilderness" : "confirmed";
-                save();
-            } else { q.locationStatus = "api-failed"; save(); }
+                signDirty = true;
+            } else { q.locationStatus = "api-failed"; signDirty = true; }
         }));
     }
 
@@ -298,7 +377,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 q.town = result.town(); q.nation = result.nation();
             }
             if (QUOTES.contains(q)) {
-                save();
+                signDirty = true;
                 if (result.ok()) say("Shop location: " + place(q) + " (" + q.locationAccuracy + ")");
             }
         }));
@@ -481,6 +560,10 @@ public final class EarthMarketClient implements ClientModInitializer {
         } catch (Exception e) { say("Failed to save prices: " + e.getMessage()); }
     }
 
+    public static void locateShop(DisplayQuote q) {
+        say(ShopLocator.start(q));
+    }
+
     private static void say(String message) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) mc.player.sendSystemMessage(Component.literal("[EM Market] " + message));
@@ -489,7 +572,8 @@ public final class EarthMarketClient implements ClientModInitializer {
     // Immutable read-only snapshots for the UI; never expose mutable database objects.
     public record DisplayQuote(String item, String type, String shop, double unitPrice,
                                double bundlePrice, int amount, Integer available, String status,
-                               String town, String nation, String updated, String accuracy, String source, String enchantments) {}
+                               String town, String nation, String updated, String accuracy, String source, String enchantments,
+                               int x, int y, int z, String dimension) {}
 
     public static String variantLabel(DisplayQuote q) {
         String suffix = q.enchantments() == null ? "" : q.enchantments().strip();
@@ -502,7 +586,8 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (!valid(q)) continue;
             result.add(new DisplayQuote(q.item, q.type, q.shop, q.price / q.amount,
                 q.price, q.amount, q.available, q.status, q.town, q.nation,
-                q.updated, q.locationAccuracy, q.source, q.enchantments));
+                q.updated, q.locationAccuracy, q.source, q.enchantments,
+                q.x, q.y, q.z, q.dimension));
         }
         return result;
     }
@@ -513,6 +598,6 @@ public final class EarthMarketClient implements ClientModInitializer {
         int amount, x, y, z;
         Integer available;
         String status;
-        String town, nation, locationStatus, locationAccuracy, signSide, dimension, enchantments;
+        String town, nation, locationStatus, locationAccuracy, signSide, dimension, enchantments, stockVerifiedAt;
     }
 }

@@ -202,3 +202,25 @@ arbitrage comparisons use the enchantment details. The manual
 If the server does not send an Enchantments section, no enchantment details
 are inferred. Only lines containing an enchantment name and level are
 automatically captured. GUI may truncate long summaries.
+
+## v0.5.1 Stock refresh fix
+- Manual QuickShop inspection refreshes the matching scanned sign's stock in-place when the match is unambiguous.
+- The next sign scan cannot overwrite a confirmed stock count with an unknown value while shop identity and price remain unchanged.
+- If sign transitions from out of stock to available, old zero stock becomes unknown until the next left-click.
+- An unchanged sign does not reveal an updated inventory count. Reinspect the shop to get fresh stock.
+- Legacy duplicate entries may require manual cleanup or rescanning.
+
+## v0.5.3 Capital-aware teleport drafts
+
+The market's **Go** button and arbitrage **Go Buy/Go Sell** inspect the shop's **physical town**, not the owner's residence. They look up `status.isCapital` using `POST /v4/towns`. Capital shops prepare `/n spawn <nation>`; non-capitals prepare `/t spawn <town>`. The player still presses Enter. Town capital flags are cached for 2 hours. API failures are reported and never guessed; teleport permissions/public status are not guaranteed.
+
+
+## v0.5.4 — crowded-market performance fix
+
+- Replaced 105,625 per-block lookups per scan with iteration over **loaded chunks' block entities only**.
+- Bounded scanning to **one chunk and 48 signs per client tick**. Signs outside the original 32×32 horizontal and ±12 vertical range remain excluded.
+- API location completions now mark the database dirty instead of rewriting `prices.json` after every response. Autoscan writes are batched on a ~5-second debounce.
+- Reduced location-lookup queue draining from 80 to 20 entries/tick.
+- Retained `/emprice scan`, `/emprice autoscan on/off`, GUI, arbitrage, and older prices.json.
+
+If crashes persist, turn off autoscan, temporarily reduce Minecraft view distance, and send the newest `crash-reports/*.txt` and `logs/latest.log`.
