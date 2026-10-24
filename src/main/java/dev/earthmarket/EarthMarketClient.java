@@ -17,7 +17,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.regex.*;
 
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.*;
+import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.*;
 
 public final class EarthMarketClient implements ClientModInitializer {
     private static final Gson JSON = new GsonBuilder().setPrettyPrinting().create();
@@ -157,7 +157,7 @@ public final class EarthMarketClient implements ClientModInitializer {
 
     private static void say(String message) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) mc.player.displayClientMessage(Component.literal("[EM Market] " + message), false);
+        if (mc.player != null) mc.player.sendSystemMessage(Component.literal("[EM Market] " + message));
     }
 
     private static class Quote {
