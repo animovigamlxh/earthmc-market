@@ -16,7 +16,11 @@ public final class NearbySignScanner {
     private static final int SIGNS_PER_TICK = 48;
     private static final long AUTO_INTERVAL_MS = 30_000;
     private final BiConsumer<BlockPos, Found> onFound;
-    private boolean auto = false, active = false;
+    private boolean auto = true, active = false;
+    private static final int MOVEMENT_RESCAN_BLOCKS = 24;
+    private static final long MOVEMENT_RESCAN_COOLDOWN_MS = 8_000L;
+    private int lastScanX, lastScanZ;
+    private String lastScanDimension = "";
     private int centerX, centerY, centerZ, chunkCursor, signCursor, candidates, recognized;
     private int minChunkX, maxChunkX, minChunkZ, maxChunkZ;
     private long lastAutomaticAt;
@@ -33,6 +37,7 @@ public final class NearbySignScanner {
         if (mc.player == null || mc.level == null) return false;
         centerX = mc.player.getBlockX(); centerY = mc.player.getBlockY(); centerZ = mc.player.getBlockZ();
         dimensionKey = mc.level.dimension().toString();
+        lastScanX = centerX; lastScanZ = centerZ; lastScanDimension = dimensionKey;
         minChunkX = Math.floorDiv(centerX - RADIUS, 16);
         maxChunkX = Math.floorDiv(centerX + RADIUS, 16);
         minChunkZ = Math.floorDiv(centerZ - RADIUS, 16);
@@ -47,7 +52,13 @@ public final class NearbySignScanner {
         if (mc.player == null || mc.level == null) { active = false; pending.clear(); return; }
         if (active && !dimensionKey.equals(mc.level.dimension().toString())) { active = false; pending.clear(); }
         if (!active) {
-            if (auto && System.currentTimeMillis() - lastAutomaticAt >= AUTO_INTERVAL_MS) start(mc);
+            long elapsed = System.currentTimeMillis() - lastAutomaticAt;
+            int dx = mc.player.getBlockX() - lastScanX;
+            int dz = mc.player.getBlockZ() - lastScanZ;
+            boolean newArea = !mc.level.dimension().toString().equals(lastScanDimension)
+                || (long) dx * dx + (long) dz * dz >= MOVEMENT_RESCAN_BLOCKS * MOVEMENT_RESCAN_BLOCKS;
+            if (auto && (elapsed >= AUTO_INTERVAL_MS
+                || (newArea && elapsed >= MOVEMENT_RESCAN_COOLDOWN_MS))) start(mc);
             return;
         }
         int chunkWidth = maxChunkX - minChunkX + 1;
@@ -81,7 +92,7 @@ public final class NearbySignScanner {
         if (chunkCursor >= totalChunks && signCursor >= pending.size()) {
             active = false; pending.clear();
             if (mc.player != null) mc.player.sendSystemMessage(Component.literal(
-                "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized. Price/stock may be stale."));
+                "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized. Sign trade states refreshed; exact quantities may be unknown."));
         }
     }
     private void scanSide(BlockPos pos, SignText text, String side) {

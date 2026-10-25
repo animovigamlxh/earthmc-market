@@ -164,11 +164,17 @@ public final class MarketScreen extends Screen {
     }
 
     private static String stockLabel(EarthMarketClient.DisplayQuote q) {
-        if ("sign-red-unverified".equals(q.status())) return "UNAVAILABLE ?";
-        if (q.available() == null) return "stock ? (unverified)";
+        if ("sign-red-unverified".equals(q.status())) return "CHECK SIGN";
         if ("out-of-stock".equals(q.status())) return "OUT OF STOCK";
         if ("full".equals(q.status())) return "BUY FULL";
-        return ("BUY".equalsIgnoreCase(q.type()) ? "space " : "stock ") + q.available();
+        if ("sign-tradeable".equals(q.status()) && q.available() == null) return "TRADEABLE (qty ?)";
+        if (q.available() == null) return "quantity unknown";
+        String prefix = "buy".equalsIgnoreCase(q.type()) ? "capacity " : "stock ";
+        if (q.signLots() != null) {
+            String units = q.available() == null ? "overflow" : String.format(Locale.ROOT, "%,d", q.available());
+            return prefix + units + " items (" + q.signLots() + " lots x " + q.amount() + ")";
+        }
+        return prefix + String.format(Locale.ROOT, "%,d", q.available()) + " items";
     }
 
     @Override
@@ -196,8 +202,8 @@ public final class MarketScreen extends Screen {
             graphics.text(this.font, originalPrice(q), left + 164, y, 0xFFFFFFFF, false);
             graphics.text(this.font, String.format(Locale.ROOT, "%.4f", q.unitPrice()), left + 286, y, 0xFFFFFFFF, false);
             graphics.text(this.font, shortText(safe(q.town()).isBlank() ? "(unknown)" : q.town(), 13), left + 390, y, 0xFFB8D9F8, false);
-            // A sign alone never reveals real stock: show unknown, not zero.
-            graphics.text(this.font, shortText(q.shop() + (q.enchantments() == null || q.enchantments().isBlank() ? "" : " | " + q.enchantments()), 38) + "  " + stockLabel(q), left + 17, y + 11, 0xFFB8BEC7, false);
+            // EarthMC sign lots are converted to item counts in the quote model.
+            graphics.text(this.font, shortText(q.shop() + (q.enchantments() == null || q.enchantments().isBlank() ? "" : " | " + q.enchantments()) + "  " + stockLabel(q), 64), left + 17, y + 11, 0xFFB8BEC7, false);
             graphics.text(this.font, shortText(q.nation(), 13), left + 390, y + 11, 0xFF95A8B5, false);
         }
         int pages = Math.max(1, (visible.size() + PAGE_SIZE - 1) / PAGE_SIZE);

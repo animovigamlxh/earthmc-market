@@ -9,16 +9,21 @@ public final class SignShopParserTest {
         check(new String[]{"thebestlung", "出售 53", "远古残骸", "单价：4G"}, "sell", 1, 4);
         check(new String[]{"thebestlung", "收购 7", "远古残骸", "单价：3G"}, "buy", 1, 3);
         check(new String[]{"GrayWolf", "出售 4", "信标", "单价：7G"}, "sell", 1, 7);
+        var normal = SignShopParser.parse(new String[]{"Researcher_Ivan", "出售 64", "钻石", "每64x 1G"});
+        if (normal == null || !"sign-tradeable".equals(normal.state()) || !Integer.valueOf(64).equals(normal.signStock())) throw new AssertionError("normal sign should be tradeable");
         var soldOut = SignShopParser.parse(new String[]{"Researcher_Ivan", "缺货", "雇主盔甲纹饰", "单价：90G"});
         if (soldOut == null || !"sell".equals(soldOut.type()) || !"out-of-stock".equals(soldOut.state())) throw new AssertionError("sold out sign");
         var fullBuy = SignShopParser.parse(new String[]{"Researcher_Ivan", "空间不足", "远古残骸", "单价：3G"});
         if (fullBuy == null || !"buy".equals(fullBuy.type()) || !"full".equals(fullBuy.state())) throw new AssertionError("full buy sign");
         if (SignShopParser.parse(new String[]{"公告", "欢迎", "光临", "无价格"}) != null) throw new AssertionError("ordinary sign recognized");
+        var lots = SignShopParser.parse(new String[]{"Felle_Homme", "出售 99", "沙子", "每64x 1G"});
+        if (lots == null || lots.signStock() != 99 || (long) lots.signStock() * lots.amount() != 6336L)
+            throw new AssertionError("99 lots of 64 must equal 6336 items");
         System.out.println("SignShopParser tests passed");
     }
     static void check(String[] lines, String type, int count, double gold) {
         var out = SignShopParser.parse(lines);
-        if (out == null || !out.type().equals(type) || out.amount() != count || out.gold() != gold)
+        if (out == null || !out.type().equals(type) || out.amount() != count || out.gold() != gold || out.signStock() == null)
             throw new AssertionError(java.util.Arrays.toString(lines));
     }
 }

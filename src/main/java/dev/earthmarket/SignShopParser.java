@@ -4,12 +4,12 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Conservative Chinese QuickShop sign parsing. No stock assertion from sign text. */
+/** Parses EarthMC signs. Second line counts trade lots; fourth line contains items per lot. */
 public final class SignShopParser {
-    private static final Pattern DIRECTION = Pattern.compile("^(出售|收购|SELL|BUY|缺货|空间不足)\\s*(?:\\d+)?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DIRECTION = Pattern.compile("^(出售|收购|SELL|BUY|缺货|空间不足)\\s*(\\d+)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern PRICE = Pattern.compile("^(?:每\\s*)?(\\d{1,6})\\s*(?:[xX×个件])?\\s*[,，:：]?\\s*(?:价格)?\\s*(\\d+(?:\\.\\d+)?)\\s*[Gg]$", Pattern.CASE_INSENSITIVE);
     private static final Pattern UNIT_PRICE = Pattern.compile("^单价\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?)\\s*[Gg]$", Pattern.CASE_INSENSITIVE);
-    public record Result(String owner, String type, String item, int amount, double gold, String state) {}
+    public record Result(String owner, String type, String item, int amount, double gold, String state, Integer signStock) {}
     private SignShopParser() {}
     public static Result parse(String[] lines) {
         if (lines == null || lines.length != 4) return null;
@@ -31,11 +31,12 @@ public final class SignShopParser {
                 case "缺货" -> "sell";
                 default -> null;
             };
+            Integer signStock = dir.group(2) == null ? null : Integer.parseInt(dir.group(2));
             return type == null ? null : new Result(owner, type, item, amount, gold, switch (dir.group(1)) {
                 case "缺货" -> "out-of-stock";
                 case "空间不足" -> "full";
-                default -> "sign-unverified";
-            });
+                default -> "sign-tradeable";
+            }, signStock);
         } catch (NumberFormatException e) { return null; }
     }
     private static String trim(String input) {

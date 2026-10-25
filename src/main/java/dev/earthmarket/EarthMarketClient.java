@@ -110,7 +110,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                     return 1;
                 }))
                 .then(literal("autoscan")
-                    .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s)."); return 1; }))
+                    .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s or after moving to a new area)."); return 1; }))
                     .then(literal("off").executes(ctx -> { SIGNS.setAuto(false); say("Auto sign scan OFF."); return 1; })))
                 .then(literal("gui").executes(ctx -> { openArbitrageGui = false; openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
                 .then(literal("arbitrage").executes(ctx -> { openArbitrageGui = true; openGuiInTicks = 2; say("Opening arbitrage opportunities..."); return 1; }))
@@ -298,35 +298,41 @@ public final class EarthMarketClient implements ClientModInitializer {
             matched = old;
             break;
         }
-        String signStatus = !"sign-unverified".equals(p.state()) ? p.state()
-            : (found.redOwner() ? "sign-red-unverified" : "sign-unverified");
+        // On EarthMC, the numeric value on the trading/status line is the displayed
+        // remaining stock (sell) or buying capacity (buy). This is distinct
+        // from the fourth line trade bundle size.
+        String signStatus = p.state();
         boolean unavailable = "out-of-stock".equals(signStatus) || "full".equals(signStatus);
+        // The sign's second-line number counts trade LOTS, not individual items.
+        // Keep the lot count for the GUI and multiply by the fourth-line bundle size.
+        Integer liveLots = unavailable ? 0 : p.signStock();
+        Integer liveStock = null;
+        if (liveLots != null) {
+            long total = (long) liveLots * p.amount();
+            // Do not silently overflow the integer database quantity.
+            if (total <= Integer.MAX_VALUE) liveStock = (int) total;
+        }
         if (matched != null) {
             boolean sameShop = Objects.equals(matched.item, item)
                 && Objects.equals(matched.type, p.type()) && Objects.equals(matched.shop, p.owner());
             boolean samePrice = matched.price == p.gold() && matched.amount == p.amount();
             boolean wasUnavailable = "out-of-stock".equals(matched.status) || "full".equals(matched.status);
-            boolean changed = !sameShop || !samePrice || unavailable != wasUnavailable;
-            // Signs never carry a live stock count. Keep positively inspected stock only
-            // while the sign still identifies the same shop and same advertised price.
+            boolean changed = !sameShop || !samePrice || !Objects.equals(matched.status, signStatus)
+                || unavailable != wasUnavailable || !Objects.equals(matched.available, liveStock)
+                || !Objects.equals(matched.signLots, liveLots);
+            // Sign state is live; numerical inventory from chat is only a historical observation.
             if (!sameShop || !samePrice) {
                 matched.available = null;
                 matched.stockVerifiedAt = null;
                 matched.enchantments = sameShop ? matched.enchantments : null;
             }
-            if (unavailable) {
-                matched.available = 0;
-                matched.stockVerifiedAt = null;
-                matched.status = signStatus;
-            } else if (wasUnavailable) {
-                matched.available = null; // Stock recovered, but actual amount unknown.
-                matched.stockVerifiedAt = null;
-                matched.status = "sign-unverified";
-            } else if (matched.stockVerifiedAt == null) {
-                matched.status = signStatus;
-            }
+            matched.available = liveStock;
+            matched.signLots = liveLots;
+            matched.stockVerifiedAt = liveStock == null ? null : Instant.now().toString();
+            matched.status = signStatus;
             matched.item = item; matched.type = p.type(); matched.shop = p.owner();
             matched.price = p.gold(); matched.amount = p.amount();
+            // Mark the record dirty only when observable fields change.
             if (changed) { matched.updated = Instant.now().toString(); signDirty = true; }
             return;
         }
@@ -334,7 +340,9 @@ public final class EarthMarketClient implements ClientModInitializer {
         q.item = item; q.type = p.type(); q.shop = p.owner(); q.amount = p.amount(); q.price = p.gold();
         q.x = pos.getX(); q.y = pos.getY(); q.z = pos.getZ(); q.signSide = found.side();
         q.dimension = dimension; q.status = signStatus;
-        if (unavailable) q.available = 0;
+        q.available = liveStock;
+        q.signLots = liveLots;
+        if (liveStock != null) q.stockVerifiedAt = q.updated;
         q.source = "earthmc-sign"; q.locationAccuracy = "sign-block";
         q.updated = Instant.now().toString();
         // Merge an earlier approximate QuickShop inspection when it unambiguously belongs here.
@@ -351,9 +359,9 @@ public final class EarthMarketClient implements ClientModInitializer {
         if (prior != null) {
             q.enchantments = prior.enchantments;
             if (!unavailable && prior.price == q.price && prior.amount == q.amount) {
-                q.available = prior.available;
-                q.status = prior.status;
-                q.stockVerifiedAt = prior.stockVerifiedAt == null ? prior.updated : prior.stockVerifiedAt;
+                q.available = liveStock;
+                q.status = signStatus;
+                q.stockVerifiedAt = liveStock == null ? null : q.updated;
             }
             QUOTES.remove(prior);
         }
@@ -451,7 +459,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         return (q.available == null || q.available > 0)
             && !"full".equals(q.status) && !"out-of-stock".equals(q.status)
             && !"unavailable".equals(q.status)
-            && !"sign-red-unverified".equals(q.status) && !"sign-unverified".equals(q.status);
+            && !"sign-red-unverified".equals(q.status);
     }
 
     private static void recent() {
@@ -589,7 +597,7 @@ public final class EarthMarketClient implements ClientModInitializer {
 
     // Immutable read-only snapshots for the UI; never expose mutable database objects.
     public record DisplayQuote(String item, String type, String shop, double unitPrice,
-                               double bundlePrice, int amount, Integer available, String status,
+                               double bundlePrice, int amount, Integer available, Integer signLots, String status,
                                String town, String nation, String updated, String accuracy, String source, String enchantments,
                                int x, int y, int z, String dimension) {}
 
@@ -603,7 +611,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         for (Quote q : QUOTES) {
             if (!valid(q)) continue;
             result.add(new DisplayQuote(q.item, q.type, q.shop, q.price / q.amount,
-                q.price, q.amount, q.available, q.status, q.town, q.nation,
+                q.price, q.amount, q.available, q.signLots, q.status, q.town, q.nation,
                 q.updated, q.locationAccuracy, q.source, q.enchantments,
                 q.x, q.y, q.z, q.dimension));
         }
@@ -615,6 +623,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         double price;
         int amount, x, y, z;
         Integer available;
+        Integer signLots; // Number of trade lots shown on the sign; available is item units.
         String status;
         String town, nation, locationStatus, locationAccuracy, signSide, dimension, enchantments, stockVerifiedAt;
     }

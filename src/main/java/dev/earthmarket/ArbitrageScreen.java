@@ -117,7 +117,7 @@ public final class ArbitrageScreen extends Screen {
             g.text(font,"Buy " +shortName(safe(o.ask.town()).isBlank()?"?":o.ask.town(),13)+" "+price(o.ask),l+7,y+11,0xFFB7DFEE,false);
             g.text(font,"Sell "+shortName(safe(o.bid.town()).isBlank()?"?":o.bid.town(),13)+" "+price(o.bid),l+182,y+11,0xFFB3EFCB,false);
             g.text(font,String.format(Locale.ROOT,"+%.4f",o.spread()),l+331,y,0xFF82EAAF,false);
-            String flag=o.stockClass()==1?"Stock confirmed, max "+o.maxUnits():"Stock unverified";
+            String flag=o.stockClass()==1?"Max "+o.maxUnits()+" items":"Tradeable; qty unknown";
             g.text(font,shortName(flag,23),l+318,y+11,o.stockClass()==1?0xFF8EDAA7:0xFFFFCB77,false);
         }
         int pages=Math.max(1,(results.size()+PER_PAGE-1)/PER_PAGE);
