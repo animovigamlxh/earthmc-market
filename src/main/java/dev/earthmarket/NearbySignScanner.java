@@ -76,12 +76,21 @@ public final class NearbySignScanner {
                 if (!mc.level.hasChunkAt(check)) continue;
                 // Copy the map entries before processing. Never mutate chunk internals.
                 for (var entry : mc.level.getChunk(cx, cz).getBlockEntities().entrySet()) {
-                    if (entry.getValue() instanceof SignBlockEntity) pending.add(entry);
+                    // Chunk block-entity maps may contain stale/null positions during chunk updates.
+                    // Snapshot values rather than retaining live Map.Entry references.
+                    BlockEntity entity = entry.getValue();
+                    if (!(entity instanceof SignBlockEntity)) continue;
+                    BlockPos position = entry.getKey();
+                    if (position == null) position = entity.getBlockPos();
+                    if (position == null) continue;
+                    pending.add(new java.util.AbstractMap.SimpleImmutableEntry<>(position.immutable(), entity));
                 }
                 continue;
             }
             var entry = pending.get(signCursor++);
+            if (entry == null) continue;
             BlockPos pos = entry.getKey();
+            if (pos == null) continue; // Never let malformed/stale entries crash the client.
             if (Math.abs(pos.getX() - centerX) > RADIUS || Math.abs(pos.getZ() - centerZ) > RADIUS
                 || Math.abs(pos.getY() - centerY) > VERTICAL) continue;
             if (!(entry.getValue() instanceof SignBlockEntity sign)) continue;
@@ -92,7 +101,7 @@ public final class NearbySignScanner {
         if (chunkCursor >= totalChunks && signCursor >= pending.size()) {
             active = false; pending.clear();
             if (mc.player != null) mc.player.sendSystemMessage(Component.literal(
-                "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized. Sign trade states refreshed; exact quantities may be unknown."));
+                "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized."));
         }
     }
     private void scanSide(BlockPos pos, SignText text, String side) {
