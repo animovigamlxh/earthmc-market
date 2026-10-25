@@ -125,10 +125,13 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | autoscan <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (overlay) return;
-            inspectShopMessage(message.getString());
-            captureEnchantMessage(message.getString());
-            Matcher match = SHOP_LINE.matcher(message.getString());
+            if (overlay || emittingLocalMessage) return;
+            String received = message.getString();
+            // sendSystemMessage also fires this receive event. Never parse our own output.
+            if (received.startsWith("[EM Market] ")) return;
+            inspectShopMessage(received);
+            captureEnchantMessage(received);
+            Matcher match = SHOP_LINE.matcher(received);
             if (!match.find()) return;
             var player = Minecraft.getInstance().player;
             if (player == null) return;
@@ -225,12 +228,14 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     private static void finishEnchantCapture() {
-        if (enchantCaptureShop != null && ENCHANT_CHAT.hasEntries()) {
-            say("Captured " + ENCHANT_CHAT.details() + " for " + enchantCaptureShop.item);
-        }
+        // Clear state BEFORE publishing any client-side message. Publishing messages
+        // can synchronously enter the same receive listener again.
+        String completion = enchantCaptureShop != null && ENCHANT_CHAT.hasEntries()
+            ? "Captured " + ENCHANT_CHAT.details() + " for " + enchantCaptureShop.item : null;
         enchantCaptureShop = null;
         enchantCaptureDeadline = 0L;
         ENCHANT_CHAT.reset();
+        if (completion != null) say(completion);
     }
 
     private static void setInspectedEnchants(String raw) {
@@ -567,9 +572,19 @@ public final class EarthMarketClient implements ClientModInitializer {
         say(ShopLocator.start(q));
     }
 
+    private static boolean emittingLocalMessage = false;
+
     private static void say(String message) {
+        // Protect the game-message listener from synchronous re-entry.
+        if (emittingLocalMessage) return;
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) mc.player.sendSystemMessage(Component.literal("[EM Market] " + message));
+        if (mc.player == null) return;
+        emittingLocalMessage = true;
+        try {
+            mc.player.sendSystemMessage(Component.literal("[EM Market] " + message));
+        } finally {
+            emittingLocalMessage = false;
+        }
     }
 
     // Immutable read-only snapshots for the UI; never expose mutable database objects.

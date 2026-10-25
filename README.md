@@ -246,3 +246,8 @@ movement/teleport away from the departure position. It then checks every 5 clien
 ticks for the chosen shop block within 48 blocks and loaded. It highlights
 immediately upon entering range (no fixed five-second delay), or expires after
 three minutes. A different command or an unsent draft cancels tracking.
+
+
+## v0.5.10 — crash fix
+
+Fix recursive client chat handling: ignore locally emitted `[EM Market]` messages, guard `say()` against reentrancy, and clear enchant capture state before emitting its completion notice. No price records are deleted.
