@@ -98,6 +98,8 @@ public final class PendingShopTravel {
         if (mc.player != null) mc.player.sendSystemMessage(Component.literal("[EM Market] " + msg));
     }
 
+    public static void cancel() { clear(); }
+
     private static void clear() {
         pending = null; pendingCommand = null; awaitingSubmit = false;
         armedAt = 0; sentAt = 0; originDimension = null; sawTravel = false;

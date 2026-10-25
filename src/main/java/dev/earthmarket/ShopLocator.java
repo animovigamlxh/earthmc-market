@@ -51,6 +51,8 @@ public final class ShopLocator {
             : "Highlighting container at " + found.toShortString() + " for 6 seconds.";
     }
 
+    public static void clear() { target = null; ticksLeft = 0; }
+
     public static void tick(Minecraft mc) {
         if (target == null) return;
         if (mc.level == null || mc.player == null || !mc.level.dimension().toString().equals(dimension)

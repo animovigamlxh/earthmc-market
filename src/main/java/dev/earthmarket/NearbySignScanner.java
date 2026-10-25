@@ -17,6 +17,8 @@ public final class NearbySignScanner {
     private static final long AUTO_INTERVAL_MS = 30_000;
     private final BiConsumer<BlockPos, Found> onFound;
     private boolean auto = true, active = false;
+    private boolean reportNextCompletion = false;
+    private boolean showAutomaticMessages = false;
     private static final int MOVEMENT_RESCAN_BLOCKS = 24;
     private static final long MOVEMENT_RESCAN_COOLDOWN_MS = 8_000L;
     private int lastScanX, lastScanZ;
@@ -32,6 +34,13 @@ public final class NearbySignScanner {
     public boolean autoEnabled() { return auto; }
     public void setAuto(boolean enabled) { this.auto = enabled; }
     public boolean active() { return active; }
+    public void setShowAutomaticMessages(boolean enabled) { showAutomaticMessages = enabled; }
+    public void pause() { active = false; pending.clear(); signCursor = 0; reportNextCompletion = false; }
+    public boolean startManual(Minecraft mc) {
+        if (!start(mc)) return false;
+        reportNextCompletion = true;
+        return true;
+    }
 
     public boolean start(Minecraft mc) {
         if (mc.player == null || mc.level == null) return false;
@@ -100,8 +109,10 @@ public final class NearbySignScanner {
         }
         if (chunkCursor >= totalChunks && signCursor >= pending.size()) {
             active = false; pending.clear();
-            if (mc.player != null) mc.player.sendSystemMessage(Component.literal(
-                "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized."));
+            if ((reportNextCompletion || showAutomaticMessages) && mc.player != null)
+                mc.player.sendSystemMessage(Component.literal(
+                    "[EM Market] Sign scan finished: " + candidates + " signs, " + recognized + " recognized."));
+            reportNextCompletion = false;
         }
     }
     private void scanSide(BlockPos pos, SignText text, String side) {

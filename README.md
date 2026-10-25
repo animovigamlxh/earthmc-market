@@ -251,3 +251,15 @@ three minutes. A different command or an unsent draft cancels tracking.
 ## v0.5.10 — crash fix
 
 Fix recursive client chat handling: ignore locally emitted `[EM Market]` messages, guard `say()` against reentrancy, and clear enchant capture state before emitting its completion notice. No price records are deleted.
+
+### v0.5.15: EarthMC-only mode and quiet scanning
+
+- The mod's `/emprice` commands, automatic sign scanning, incoming chat parsing,
+  and travel highlight tracking are active only when connected using the
+  `earthmc.net` host or a subdomain such as `play.earthmc.net`. On other servers
+  and in singleplayer, the mod does not scan or parse market messages.
+- Automatic scan completion chat is **off** by default. Toggle using
+  `/emprice scanmsg on` and `/emprice scanmsg off` (persists in
+  `config/earthmc-market/settings.json`). Scanning and database updates still run.
+- Explicit `/emprice scan` always shows a one-off start/completion message.
+- Auto-scan itself is controlled separately using `/emprice autoscan on|off`.

@@ -29,6 +29,9 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final Path DATABASE = DIRECTORY.resolve("prices.json");
     private static final Path IMPORT = DIRECTORY.resolve("import.json");
     private static final Path BACKUP = DIRECTORY.resolve("prices-backup.json");
+    private static final Path SETTINGS = DIRECTORY.resolve("settings.json");
+    // Quiet by default: only an explicit /emprice scan reports its completion.
+    private static boolean showAutoScanMessages = false;
     private static final List<Quote> QUOTES = new ArrayList<>();
     private static final NearbySignScanner SIGNS = new NearbySignScanner(EarthMarketClient::foundSign);
     
@@ -50,11 +53,72 @@ public final class EarthMarketClient implements ClientModInitializer {
     // Intentionally strict: no quote is created when type, price or quantity is ambiguous.
     private static final Pattern SHOP_LINE = Pattern.compile("(?i)(?:quickshop|shop)\\s*[:|]\\s*([a-z0-9_:.-]+)\\s+(BUY|SELL)\\s+(\\d+)\\s*(?:items?\\s*)?(?:for|@)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:g|gold)\\b");
 
+    /** Only process server sessions using EarthMC's official hostname. A LAN or
+     *  singleplayer world must not activate the mod, even if its chat resembles QuickShop. */
+    private static long serverCheckAt = 0L;
+    private static boolean serverCheckValue = false;
+    public static boolean isEarthMc(Minecraft mc) {
+        if (mc == null || mc.level == null || mc.player == null) { serverCheckAt = 0; serverCheckValue = false; return false; }
+        long now = System.currentTimeMillis();
+        if (serverCheckAt != 0 && now - serverCheckAt < 1000L) return serverCheckValue;
+        serverCheckAt = now;
+        serverCheckValue = false;
+        try {
+            // Access reflectively to tolerate method mapping changes across patch releases.
+            Object server = mc.getClass().getMethod("getCurrentServer").invoke(mc);
+            if (server == null) return false;
+            Object address = server.getClass().getField("ip").get(server);
+            if (!(address instanceof String ip)) return false;
+            String host = ip.strip().toLowerCase(Locale.ROOT);
+            int port = host.lastIndexOf(':');
+            if (port >= 0) host = host.substring(0, port);
+            while (host.endsWith(".")) host = host.substring(0, host.length() - 1);
+            serverCheckValue = host.equals("earthmc.net") || host.endsWith(".earthmc.net");
+            return serverCheckValue;
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return false;
+        }
+    }
+
+    private static void loadSettings() {
+        try {
+            if (!Files.isRegularFile(SETTINGS)) return;
+            try (Reader reader = Files.newBufferedReader(SETTINGS)) {
+                JsonObject config = JsonParser.parseReader(reader).getAsJsonObject();
+                if (config.has("showAutoScanMessages"))
+                    showAutoScanMessages = config.get("showAutoScanMessages").getAsBoolean();
+            }
+        } catch (Exception ignored) { showAutoScanMessages = false; }
+    }
+    private static void setAutoScanMessages(boolean enabled) {
+        showAutoScanMessages = enabled;
+        SIGNS.setShowAutomaticMessages(enabled);
+        try {
+            Files.createDirectories(DIRECTORY);
+            JsonObject settings = new JsonObject();
+            settings.addProperty("showAutoScanMessages", enabled);
+            try (Writer writer = Files.newBufferedWriter(SETTINGS)) { JSON.toJson(settings, writer); }
+        } catch (Exception exception) { say("Could not save scan message preference: " + exception.getMessage()); }
+    }
+
     @Override public void onInitializeClient() {
         load();
+        loadSettings();
+        SIGNS.setShowAutomaticMessages(showAutoScanMessages);
         ShopEspRenderer.register();
         PendingShopTravel.register();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (!isEarthMc(client)) {
+                SIGNS.pause();
+                PendingShopTravel.cancel();
+                ShopLocator.clear();
+                SIGN_LOCATION_QUEUE.clear();
+                CHAT_SCAN.setLength(0);
+                enchantCaptureShop = null;
+                lastInspectedShop = null;
+                openGuiInTicks = -1;
+                return;
+            }
             SIGNS.tick(client);
             ShopLocator.tick(client);
             PendingShopTravel.tick(client);
@@ -75,7 +139,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (client.player != null) client.gui.setScreen((openArbitrageGui ? new ArbitrageScreen() : new MarketScreen()));
         });
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
-            literal("emprice")
+            literal("emprice").requires(source -> isEarthMc(Minecraft.getInstance()))
                 .then(literal("add")
                     .then(argument("item", StringArgumentType.word())
                         .then(argument("type", StringArgumentType.word())
@@ -106,12 +170,16 @@ public final class EarthMarketClient implements ClientModInitializer {
                         setInspectedEnchants(StringArgumentType.getString(ctx, "details")); return 1;
                     })))
                 .then(literal("scan").executes(ctx -> {
-                    say(SIGNS.start(Minecraft.getInstance()) ? "Scanning nearby loaded signs (32 blocks horizontal, +/-12 vertical)..." : "Join a world first.");
+                    say(SIGNS.startManual(Minecraft.getInstance()) ? "Scanning nearby loaded signs (32 blocks horizontal, +/-12 vertical)..." : "Join an EarthMC world first.");
                     return 1;
                 }))
                 .then(literal("autoscan")
                     .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s or after moving to a new area)."); return 1; }))
                     .then(literal("off").executes(ctx -> { SIGNS.setAuto(false); say("Auto sign scan OFF."); return 1; })))
+                .then(literal("scanmsg")
+                    .then(literal("on").executes(ctx -> { setAutoScanMessages(true); say("Automatic scan chat messages ON."); return 1; }))
+                    .then(literal("off").executes(ctx -> { setAutoScanMessages(false); say("Automatic scan chat messages OFF (scans still run). "); return 1; }))
+                    .executes(ctx -> { say("Automatic scan chat messages: " + (showAutoScanMessages ? "ON" : "OFF") + ". Use /emprice scanmsg on|off."); return 1; }))
                 .then(literal("gui").executes(ctx -> { openArbitrageGui = false; openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
                 .then(literal("arbitrage").executes(ctx -> { openArbitrageGui = true; openGuiInTicks = 2; say("Opening arbitrage opportunities..."); return 1; }))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
@@ -122,10 +190,10 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | autoscan <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (overlay || emittingLocalMessage) return;
+            if (overlay || emittingLocalMessage || !isEarthMc(Minecraft.getInstance())) return;
             String received = message.getString();
             // sendSystemMessage also fires this receive event. Never parse our own output.
             if (received.startsWith("[EM Market] ")) return;
