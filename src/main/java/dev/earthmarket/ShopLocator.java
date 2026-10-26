@@ -46,6 +46,7 @@ public final class ShopLocator {
         dimension = mc.level.dimension().toString();
         ticksLeft = 120;
         age = 0;
+        NavigationGuide.clear();
         return markerIsSign
             ? "Multiple/no matching containers; outlining SHOP SIGN at " + sign.toShortString() + " for 6 seconds."
             : "Highlighting container at " + found.toShortString() + " for 6 seconds.";

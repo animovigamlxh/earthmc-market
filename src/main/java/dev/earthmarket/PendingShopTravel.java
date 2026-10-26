@@ -17,6 +17,7 @@ public final class PendingShopTravel {
     private static double originX, originY, originZ;
     private static boolean sawTravel;
     private static boolean sawWorldUnload;
+    private static boolean guideStarted;
     private static int tickCounter;
 
     private PendingShopTravel() {}
@@ -48,6 +49,7 @@ public final class PendingShopTravel {
         awaitingSubmit = false;
         sawTravel = false;
         sawWorldUnload = false;
+        guideStarted = false;
         tickCounter = 0;
         if (mc.level != null && mc.player != null) {
             originDimension = mc.level.dimension().toString();
@@ -78,8 +80,9 @@ public final class PendingShopTravel {
         double dz = mc.player.getZ() - originZ;
         if (dx * dx + dy * dy + dz * dz > 12.0 * 12.0) sawTravel = true;
         if (sawWorldUnload) sawTravel = true;
-        if (!sawTravel) return; // don't highlight at the departure location
+        if (!sawTravel) return; // don't guide/highlight at the departure location
         EarthMarketClient.DisplayQuote q = pending;
+        if (!guideStarted) { NavigationGuide.setTarget(q); guideStarted = true; }
         if (q.dimension() != null && !q.dimension().equals(dimension)) return;
         BlockPos pos = new BlockPos(q.x(), q.y(), q.z());
         if (!mc.level.hasChunkAt(pos)) return;
@@ -103,6 +106,6 @@ public final class PendingShopTravel {
     private static void clear() {
         pending = null; pendingCommand = null; awaitingSubmit = false;
         armedAt = 0; sentAt = 0; originDimension = null; sawTravel = false;
-        sawWorldUnload = false; tickCounter = 0;
+        sawWorldUnload = false; guideStarted = false; tickCounter = 0;
     }
 }

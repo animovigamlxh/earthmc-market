@@ -112,6 +112,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         loadSettings();
         SIGNS.setShowAutomaticMessages(showAutoScanMessages);
         ShopEspRenderer.register();
+        NavigationGuide.register();
         PendingShopTravel.register();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!isEarthMc(client)) {
@@ -127,6 +128,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             }
             SIGNS.tick(client);
             ShopLocator.tick(client);
+            NavigationGuide.tick(client);
             PendingShopTravel.tick(client);
             if (enchantCaptureShop != null && System.currentTimeMillis() > enchantCaptureDeadline) finishEnchantCapture();
             // Drain into resolver's deduplicated batch queue; HTTP requests are paced there.
@@ -741,6 +743,7 @@ public final class EarthMarketClient implements ClientModInitializer {
 
     public static void locateShop(DisplayQuote q) {
         say(ShopLocator.coordinates(q));
+        NavigationGuide.setTarget(q);
         say(ShopLocator.start(q));
     }
 
