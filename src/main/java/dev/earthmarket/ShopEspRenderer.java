@@ -96,31 +96,65 @@ public final class ShopEspRenderer {
         if(info != null) draw(info,pipeline);
         BUFFER.endFrame();
     }
-    /** Camera-to-shop tracer as two crossed thin translucent-free ribbons. */
+    /**
+     * Start the tracer on the player's sight line, NOT on the line from the
+     * camera toward the shop. This keeps the tracer rooted near the crosshair
+     * even when the shop is outside the view or directly behind the player.
+     */
     private static void tracer(Matrix4fc mat, VertexConsumer b, Vec3 eye, BlockPos destination) {
-        double dx = destination.getX() + 0.5 - eye.x;
-        double dy = destination.getY() + 0.5 - eye.y;
-        double dz = destination.getZ() + 0.5 - eye.z;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+        double dx = destination.getX() + .5 - eye.x;
+        double dy = destination.getY() + .5 - eye.y;
+        double dz = destination.getZ() + .5 - eye.z;
         double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (distance < 2.0 || !Double.isFinite(distance)) return;
         double ux = dx / distance, uy = dy / distance, uz = dz / distance;
-        // Start outside the camera near plane and extend toward the real target.
-        double start = 1.25, end = Math.min(distance, 80.0);
-        if (end <= start) return;
-        float ax = (float) (eye.x + ux * start), ay = (float) (eye.y + uy * start), az = (float) (eye.z + uz * start);
-        float bx = (float) (eye.x + ux * end), by = (float) (eye.y + uy * end), bz = (float) (eye.z + uz * end);
-        // Horizontal perpendicular; if the target is straight above/below, use X axis.
-        double h = Math.hypot(ux, uz);
-        double px = h > 1e-5 ? -uz / h : 1.0, pz = h > 1e-5 ? ux / h : 0.0;
-        double qx = -uy * pz, qy = uz * px - ux * pz, qz = uy * px;
-        float w = 0.025f;
+
+        // Camera/player orientation: yaw=0 faces positive Z; pitch positive looks down.
+        double yaw = Math.toRadians(mc.player.getYRot());
+        double pitch = Math.toRadians(mc.player.getXRot());
+        double cosPitch = Math.cos(pitch);
+        double fx = -Math.sin(yaw) * cosPitch;
+        double fy = -Math.sin(pitch);
+        double fz = Math.cos(yaw) * cosPitch;
+        // Fixed point on the sight line; the segment becomes visible even if
+        // the target is off screen, exactly like an ESP tracer.
+        double anchor = 0.65;
+        float ax = (float) (eye.x + fx * anchor);
+        float ay = (float) (eye.y + fy * anchor);
+        float az = (float) (eye.z + fz * anchor);
+        double end = Math.min(distance, 80.0);
+        float bx = (float) (eye.x + ux * end);
+        float by = (float) (eye.y + uy * end);
+        float bz = (float) (eye.z + uz * end);
+
+        double lx = bx - ax, ly = by - ay, lz = bz - az;
+        double lineLen = Math.sqrt(lx*lx + ly*ly + lz*lz);
+        if (lineLen < 0.1 || !Double.isFinite(lineLen)) return;
+        lx /= lineLen; ly /= lineLen; lz /= lineLen;
+        double horizontal = Math.hypot(lx, lz);
+        double px = horizontal > 1e-5 ? -lz / horizontal : 1.0;
+        double pz = horizontal > 1e-5 ? lx / horizontal : 0.0;
+        double qx = ly * pz;
+        double qy = lz * px - lx * pz;
+        double qz = -ly * px;
+        float w = 0.035f;
         float r = 0.13f, g = 1.0f, blue = 0.6f, alpha = 1f;
-        quad(mat,b, ax+(float)(px*w),ay,az+(float)(pz*w), bx+(float)(px*w),by,bz+(float)(pz*w),
-            bx-(float)(px*w),by,bz-(float)(pz*w), ax-(float)(px*w),ay,az-(float)(pz*w),r,g,blue,alpha);
-        quad(mat,b, ax+(float)(qx*w),ay+(float)(qy*w),az+(float)(qz*w),
-            bx+(float)(qx*w),by+(float)(qy*w),bz+(float)(qz*w),
-            bx-(float)(qx*w),by-(float)(qy*w),bz-(float)(qz*w),
-            ax-(float)(qx*w),ay-(float)(qy*w),az-(float)(qz*w),r,g,blue,alpha);
+        tracerRibbon(mat,b,ax,ay,az,bx,by,bz,(float)px,0f,(float)pz,w,r,g,blue,alpha);
+        tracerRibbon(mat,b,ax,ay,az,bx,by,bz,(float)qx,(float)qy,(float)qz,w,r,g,blue,alpha);
+    }
+
+    /** Draw both sides so back-face culling doesn't make the line disappear. */
+    private static void tracerRibbon(Matrix4fc m, VertexConsumer b,
+                                     float ax,float ay,float az,float bx,float by,float bz,
+                                     float px,float py,float pz,float width,
+                                     float r,float g,float blue,float alpha) {
+        float ox=px*width, oy=py*width, oz=pz*width;
+        quad(m,b,ax+ox,ay+oy,az+oz,bx+ox,by+oy,bz+oz,
+             bx-ox,by-oy,bz-oz,ax-ox,ay-oy,az-oz,r,g,blue,alpha);
+        quad(m,b,ax-ox,ay-oy,az-oz,bx-ox,by-oy,bz-oz,
+             bx+ox,by+oy,bz+oz,ax+ox,ay+oy,az+oz,r,g,blue,alpha);
     }
     private static void box(Matrix4fc mat, VertexConsumer b, float x0,float y0,float z0,float x1,float y1,float z1,float r,float g,float bl,float a) {
         quad(mat,b,x0,y0,z1,x1,y0,z1,x1,y1,z1,x0,y1,z1,r,g,bl,a);
