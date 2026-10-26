@@ -45,6 +45,8 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static int scanX, scanY, scanZ;
     private static boolean scanTargetExact;
     private static String scanFingerprint = "";
+    private static HoverVariantReader.Identity pendingHoverVariant;
+    private static long hoverSeenAt;
     private static Quote lastInspectedShop;
     private static final EnchantChatParser ENCHANT_CHAT = new EnchantChatParser();
     private static long enchantCaptureDeadline = 0L;
@@ -199,6 +201,12 @@ public final class EarthMarketClient implements ClientModInitializer {
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay || emittingLocalMessage || !isEarthMc(Minecraft.getInstance())) return;
             String received = message.getString();
+            // Read structured hover metadata before flattening the component to text.
+            HoverVariantReader.Identity preview = HoverVariantReader.fromMessage(message);
+            if (preview != null && (received.contains("物品") || received.contains("预览") || received.contains("价格"))) {
+                pendingHoverVariant = preview;
+                hoverSeenAt = System.currentTimeMillis();
+            }
             // sendSystemMessage also fires this receive event. Never parse our own output.
             if (received.startsWith("[EM Market] ")) return;
             inspectShopMessage(received);
@@ -226,6 +234,8 @@ public final class EarthMarketClient implements ClientModInitializer {
             finishEnchantCapture();
             CHAT_SCAN.setLength(0);
             scanFingerprint = "";
+            pendingHoverVariant = null;
+            hoverSeenAt = 0;
             scanStartedAt = System.currentTimeMillis();
             var player = Minecraft.getInstance().player;
             if (player == null) return;
@@ -261,12 +271,18 @@ public final class EarthMarketClient implements ClientModInitializer {
         q.shop = result.owner; q.x = scanX; q.y = scanY; q.z = scanZ;
         q.available = result.available; q.status = result.state;
         q.source = "earthmc-quickshop"; q.updated = Instant.now().toString();
+        if (pendingHoverVariant != null && System.currentTimeMillis() - hoverSeenAt < 5000L) {
+            q.variantKey = pendingHoverVariant.key();
+            q.variantDescription = pendingHoverVariant.label();
+        }
         q.locationAccuracy = scanTargetExact ? "target-block" : "player-approx";
         // Reinspection of the same QuickShop should retain manually captured metadata.
         for (Quote old : QUOTES) {
             if (!"earthmc-quickshop".equals(old.source) || !Objects.equals(old.shop, q.shop)
                 || !Objects.equals(old.type, q.type) || !Objects.equals(old.item, q.item)) continue;
-            if (old.x == q.x && old.y == q.y && old.z == q.z) { q.enchantments = old.enchantments; break; }
+            if (old.x == q.x && old.y == q.y && old.z == q.z) { q.enchantments = old.enchantments;
+                if (q.variantKey == null) { q.variantKey = old.variantKey; q.variantDescription = old.variantDescription; }
+                break; }
         }
         // If this inspection refers to a nearby physical sign, refresh that sign entry
         // instead of storing a competing QuickShop quote with stale sign stock.
@@ -348,6 +364,10 @@ public final class EarthMarketClient implements ClientModInitializer {
         candidate.price = inspected.price;
         candidate.amount = inspected.amount;
         candidate.available = inspected.available;
+        if (inspected.variantKey != null) {
+            candidate.variantKey = inspected.variantKey;
+            candidate.variantDescription = inspected.variantDescription;
+        }
         candidate.status = inspected.status;
         candidate.stockVerifiedAt = inspected.updated;
         candidate.updated = inspected.updated;
@@ -400,6 +420,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 matched.available = null;
                 matched.stockVerifiedAt = null;
                 matched.enchantments = sameShop ? matched.enchantments : null;
+                if (!sameShop) { matched.variantKey = null; matched.variantDescription = null; }
             }
             matched.available = liveStock;
             matched.signLots = liveLots;
@@ -433,6 +454,8 @@ public final class EarthMarketClient implements ClientModInitializer {
         }
         if (prior != null) {
             q.enchantments = prior.enchantments;
+            q.variantKey = prior.variantKey;
+            q.variantDescription = prior.variantDescription;
             if (!unavailable && prior.price == q.price && prior.amount == q.amount) {
                 q.available = liveStock;
                 q.status = signStatus;
@@ -645,7 +668,8 @@ public final class EarthMarketClient implements ClientModInitializer {
                 && Objects.equals(old.type, q.type)
                 && old.x == q.x && old.y == q.y && old.z == q.z
                 && Objects.equals(old.dimension, q.dimension)
-                && Objects.equals(old.shop, q.shop);
+                && Objects.equals(old.shop, q.shop)
+                && Objects.equals(old.variantKey, q.variantKey);
         });
         QUOTES.add(q);
     }
@@ -725,11 +749,14 @@ public final class EarthMarketClient implements ClientModInitializer {
     public record DisplayQuote(String id, String item, String type, String shop, double unitPrice,
                                double bundlePrice, int amount, Integer available, Integer signLots, String status,
                                String town, String nation, String updated, String accuracy, String source, String enchantments,
-                               int x, int y, int z, String dimension) {}
+                               String variantKey, String variantDescription, int x, int y, int z, String dimension) {}
 
     public static String variantLabel(DisplayQuote q) {
         String suffix = q.enchantments() == null ? "" : q.enchantments().strip();
-        return suffix.isEmpty() ? q.item() : q.item() + " [" + suffix + "]";
+        String base = q.item() == null ? "" : q.item();
+        String variant = q.variantDescription() == null ? "" : q.variantDescription().strip();
+        String label = variant.isEmpty() ? base : base + " [" + variant + "]";
+        return suffix.isEmpty() ? label : label + " [" + suffix + "]";
     }
 
     public static List<DisplayQuote> displayQuotes() {
@@ -739,7 +766,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             result.add(new DisplayQuote(q.id, q.item, q.type, q.shop, q.price / q.amount,
                 q.price, q.amount, q.available, q.signLots, q.status, q.town, q.nation,
                 q.updated, q.locationAccuracy, q.source, q.enchantments,
-                q.x, q.y, q.z, q.dimension));
+                q.variantKey, q.variantDescription, q.x, q.y, q.z, q.dimension));
         }
         return result;
     }
@@ -752,5 +779,6 @@ public final class EarthMarketClient implements ClientModInitializer {
         Integer signLots; // Number of trade lots shown on the sign; available is item units.
         String status;
         String town, nation, locationStatus, locationAccuracy, signSide, dimension, enchantments, stockVerifiedAt;
+        String variantKey, variantDescription;
     }
 }

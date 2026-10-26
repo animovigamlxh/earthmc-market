@@ -72,10 +72,24 @@ public final class ArbitrageScreen extends Screen {
             if(q.item()==null||q.amount()<=0||!Double.isFinite(q.unitPrice())||q.unitPrice()<=0)continue;
             if(MarketScreen.stockClass(q)==3)continue;
             if(!includeUnknown && MarketScreen.stockClass(q)!=1)continue;
-            byItem.computeIfAbsent(EarthMarketClient.variantLabel(q).trim().toLowerCase(Locale.ROOT), k->new ArrayList<>()).add(q);
+            // Never combine different exact item data. Unresolved sign entries may
+            // only pair with one another if there are no known variants of that name.
+            String key = (q.item() == null ? "" : q.item().strip().toLowerCase(Locale.ROOT))
+                + "\u0000" + (q.variantKey() == null ? "unknown" : "exact:" + q.variantKey())
+                + "\u0000" + safe(q.enchantments()).strip().toLowerCase(Locale.ROOT);
+            byItem.computeIfAbsent(key, k->new ArrayList<>()).add(q);
         }
         ArrayList<Opportunity> found=new ArrayList<>();
         for(var e:byItem.entrySet()) {
+            // Unknown details must not create false-positive arbitrage for item
+            // families already observed with structured variants.
+            if (e.getKey().contains("\u0000unknown\u0000")) {
+                String base = e.getKey().substring(0, e.getKey().indexOf('\u0000'));
+                String family = base + "\u0000exact:";
+                // Potentially data-bearing items must be inspected before arbitrage.
+                if (byItem.keySet().stream().anyMatch(k -> k.startsWith(family))
+                    || base.matches(".*(唱片|music.disc|附魔|enchanted|药水|potion|箭|arrow|书|book|旗帜|banner|烟花|firework|头颅|head|盔甲|armor|剑|sword|工具|tool|地图|map|潜影盒|shulker).*")) continue;
+            }
             List<EarthMarketClient.DisplayQuote> asks=new ArrayList<>(), bids=new ArrayList<>();
             for(var q:e.getValue()) ("sell".equalsIgnoreCase(q.type())?asks:bids).add(q);
             asks.sort(Comparator.comparingDouble(EarthMarketClient.DisplayQuote::unitPrice));
