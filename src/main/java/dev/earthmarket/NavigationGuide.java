@@ -54,7 +54,7 @@ public final class NavigationGuide {
         Minecraft mc = Minecraft.getInstance();
         EarthMarketClient.DisplayQuote q = target;
         if (q == null || System.currentTimeMillis() >= expiresAt || mc.player == null || mc.level == null
-                || !EarthMarketClient.isEarthMc(mc) || mc.screen != null) return;
+                || !EarthMarketClient.isEarthMc(mc) || mc.gui.screen() != null) return;
         int sw = mc.getWindow().getGuiScaledWidth();
         int sh = mc.getWindow().getGuiScaledHeight();
         int cx = sw / 2;

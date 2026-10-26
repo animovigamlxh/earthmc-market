@@ -1,0 +1,45 @@
+package dev.earthmarket;
+
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/** Parses EarthMC signs. Second line counts trade lots; fourth line contains items per lot. */
+public final class SignShopParser {
+    private static final Pattern DIRECTION = Pattern.compile("^(出售|收购|SELL|BUY|缺货|空间不足)\\s*(\\d+)?$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PRICE = Pattern.compile("^(?:每\\s*)?(\\d{1,6})\\s*(?:[xX×个件])?\\s*[,，:：]?\\s*(?:价格)?\\s*(\\d+(?:\\.\\d+)?)\\s*[Gg]$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern UNIT_PRICE = Pattern.compile("^单价\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?)\\s*[Gg]$", Pattern.CASE_INSENSITIVE);
+    public record Result(String owner, String type, String item, int amount, double gold, String state, Integer signStock) {}
+    private SignShopParser() {}
+    public static Result parse(String[] lines) {
+        if (lines == null || lines.length != 4) return null;
+        String owner = trim(lines[0]), action = trim(lines[1]), item = trim(lines[2]), price = trim(lines[3]);
+        Matcher dir = DIRECTION.matcher(action);
+        Matcher money = PRICE.matcher(price.replace(" ", ""));
+        Matcher unit = UNIT_PRICE.matcher(price);
+        if (!dir.matches() || (!money.matches() && !unit.matches())) return null;
+        if (owner.isBlank() || owner.length() > 40 || item.isBlank() || item.length() > 100) return null;
+        // Reject accidental matches on instructions or ordinary public signs.
+        if (owner.contains(" ") || owner.contains("：") || owner.contains(":")) return null;
+        try {
+            int amount = unit.matches() ? 1 : Integer.parseInt(money.group(1));
+            double gold = Double.parseDouble(unit.matches() ? unit.group(1) : money.group(2));
+            if (amount < 1 || amount > 100000 || !(gold > 0) || !Double.isFinite(gold) || gold > 1e9) return null;
+            String type = switch (dir.group(1).toUpperCase(Locale.ROOT)) {
+                case "出售", "SELL" -> "sell";
+                case "收购", "BUY", "空间不足" -> "buy";
+                case "缺货" -> "sell";
+                default -> null;
+            };
+            Integer signStock = dir.group(2) == null ? null : Integer.parseInt(dir.group(2));
+            return type == null ? null : new Result(owner, type, item, amount, gold, switch (dir.group(1)) {
+                case "缺货" -> "out-of-stock";
+                case "空间不足" -> "full";
+                default -> "sign-tradeable";
+            }, signStock);
+        } catch (NumberFormatException e) { return null; }
+    }
+    private static String trim(String input) {
+        return input == null ? "" : input.replaceAll("§[0-9a-fk-orA-FK-OR]", "").strip();
+    }
+}
