@@ -33,6 +33,7 @@ public final class MarketScreen extends Screen {
     private final Button[] townButtons = new Button[PAGE_SIZE];
     private final Button[] nationButtons = new Button[PAGE_SIZE];
     private final Button[] deleteButtons = new Button[PAGE_SIZE];
+    private final Button[] detailsButtons = new Button[PAGE_SIZE];
 
     public MarketScreen() {
         super(Component.literal("EarthMC Market"));
@@ -78,6 +79,8 @@ public final class MarketScreen extends Screen {
         for (int i = 0; i < PAGE_SIZE; i++) {
             final int row = i;
             int y = top + 70 + i * 25;
+            detailsButtons[i] = addRenderableWidget(Button.builder(Component.literal("i"), b -> showDetails(row))
+                .bounds(left + 462, y, 17, 20).build());
             locateButtons[i] = addRenderableWidget(Button.builder(Component.literal("H"), b -> highlight(row))
                 .bounds(left + 483, y, 18, 20).build());
             townButtons[i] = addRenderableWidget(Button.builder(Component.literal("Go"), b -> openTravel(row, true))
@@ -87,6 +90,13 @@ public final class MarketScreen extends Screen {
         }
         page = prefs.marketPage;
         refresh();
+    }
+
+    private void showDetails(int row) {
+        EarthMarketClient.DisplayQuote q = rowQuotes[row];
+        if (q == null) return;
+        remember();
+        this.minecraft.gui.setScreen(new QuoteDetailScreen(q, new MarketScreen()));
     }
 
     private void highlight(int row) {
@@ -132,6 +142,10 @@ public final class MarketScreen extends Screen {
             int rowIndex = page * PAGE_SIZE + i;
             EarthMarketClient.DisplayQuote q = rowIndex < visible.size() ? visible.get(rowIndex) : null;
             rowQuotes[i] = q;
+            if (detailsButtons[i] != null) {
+                detailsButtons[i].visible = q != null;
+                detailsButtons[i].active = q != null;
+            }
             if (locateButtons[i] != null) {
                 locateButtons[i].visible = q != null;
                 locateButtons[i].active = q != null && ("earthmc-sign".equals(q.source()) || "target-block".equals(q.accuracy()))
@@ -239,7 +253,7 @@ public final class MarketScreen extends Screen {
         int pages = Math.max(1, (visible.size() + PAGE_SIZE - 1) / PAGE_SIZE);
         graphics.text(this.font, "Records: " + visible.size() + "   Page " + (page + 1) + "/" + pages,
             left + 6, top + 278, 0xFFE0E4EA, false);
-        graphics.text(this.font, "H: highlight | Go: prepare teleport | Del: delete saved record",
+        graphics.text(this.font, "i: full details | H: highlight | Go: teleport | Del: delete",
             left + 6, top + 288, 0xFFFFBD7A, false);
     }
 
