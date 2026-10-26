@@ -263,3 +263,10 @@ Fix recursive client chat handling: ignore locally emitted `[EM Market]` message
   `config/earthmc-market/settings.json`). Scanning and database updates still run.
 - Explicit `/emprice scan` always shows a one-off start/completion message.
 - Auto-scan itself is controlled separately using `/emprice autoscan on|off`.
+
+
+### v0.5.16 UI persistence and deletion
+- The market GUI remembers search text, SELL/BUY filter, price order, stock filter, and page across visits and game restarts. Arbitrage screen remembers its own search, unverified filter, and page. Saved in `config/earthmc-market/gui-state.json`.
+- Press **Del** next to an observation and confirm to delete only that record from `prices.json`.
+- Deleted physical sign locations are suppressed from automatic rescan and stored in `config/earthmc-market/deleted-signs.json`. `/emprice restoredeleted` clears this suppression list (the next scan can rediscover those shops).
+- Non-sign historical records are removed directly; a newly observed real trade may create a new observation later. Back up `prices.json` before mass deletions.

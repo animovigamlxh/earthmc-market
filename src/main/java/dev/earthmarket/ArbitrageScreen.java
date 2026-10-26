@@ -27,13 +27,17 @@ public final class ArbitrageScreen extends Screen {
         int l = Math.max(4, (width-W)/2), t = Math.max(4, (height-H)/2);
         search = addRenderableWidget(new EditBox(font, l+7, t+25, 285, 20, Component.literal("Find item")));
         search.setHint(Component.literal("Search items, towns, nations"));
+        GuiPreferences.State prefs = GuiPreferences.get();
+        search.setValue(prefs.arbitrageQuery);
+        includeUnknown = prefs.arbitrageIncludeUnknown;
+        
         search.setResponder(v -> { page=0; update(); });
-        statusButton = addRenderableWidget(Button.builder(Component.literal("Include unverified"), b -> {
+        statusButton = addRenderableWidget(Button.builder(Component.literal(includeUnknown ? "Include unverified" : "Verified only"), b -> {
             includeUnknown = !includeUnknown;
             statusButton.setMessage(Component.literal(includeUnknown ? "Include unverified" : "Verified only"));
             page=0; update();
         }).bounds(l+300,t+25,148,20).build());
-        addRenderableWidget(Button.builder(Component.literal("All shops"), b -> minecraft.gui.setScreen(new MarketScreen()))
+        addRenderableWidget(Button.builder(Component.literal("All shops"), b -> { remember(); minecraft.gui.setScreen(new MarketScreen()); })
             .bounds(l+456,t+25,145,20).build());
         previous=addRenderableWidget(Button.builder(Component.literal("< Prev"), b->{ page--; update(); })
             .bounds(l+7,t+315,80,20).build());
@@ -46,6 +50,7 @@ public final class ArbitrageScreen extends Screen {
             sellTown[i]=addRenderableWidget(Button.builder(Component.literal("Go Sell"), b->travel(index,false))
                 .bounds(l+531,y,70,20).build());
         }
+        page = prefs.arbitragePage;
         update();
     }
     private static String safe(String s) { return s == null ? "" : s; }
@@ -56,6 +61,7 @@ public final class ArbitrageScreen extends Screen {
     private void travel(int i, boolean toBuy) {
         Opportunity o = current[i]; if (o == null) return;
         var q = toBuy ? o.ask : o.bid;
+        remember();
         CapitalTravelResolver.prepare(minecraft, q.town(), q.nation(), q);
     }
     private void update() {
@@ -124,5 +130,12 @@ public final class ArbitrageScreen extends Screen {
         g.text(font,"Opportunities: "+results.size()+" | page "+(page+1)+"/"+pages,l+99,t+319,0xFFEEEEEE,false);
         g.text(font,"Profit excludes fees/travel. Stock and prices can change. Go Buy/Sell only prefill chat.",l+7,t+302,0xFFFFC88E,false);
     }
-    @Override public void onClose(){minecraft.gui.setScreen(null);}
+    private void remember() {
+        GuiPreferences.State p = GuiPreferences.get();
+        p.arbitrageQuery = search == null ? "" : search.getValue();
+        p.arbitrageIncludeUnknown = includeUnknown;
+        p.arbitragePage = page;
+        GuiPreferences.save();
+    }
+    @Override public void onClose(){remember();minecraft.gui.setScreen(null);}
 }

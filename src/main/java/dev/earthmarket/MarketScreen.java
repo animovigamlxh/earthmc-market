@@ -15,7 +15,7 @@ import java.util.Locale;
 /** All controls are client-side; viewing a quote never performs a shop transaction. */
 public final class MarketScreen extends Screen {
     private static final int PAGE_SIZE = 8;
-    private static final int PANEL_W = 555;
+    private static final int PANEL_W = 585;
     private static final int PANEL_H = 326;
     private EditBox search;
     private String filter = "ALL";
@@ -32,6 +32,7 @@ public final class MarketScreen extends Screen {
     private final Button[] locateButtons = new Button[PAGE_SIZE];
     private final Button[] townButtons = new Button[PAGE_SIZE];
     private final Button[] nationButtons = new Button[PAGE_SIZE];
+    private final Button[] deleteButtons = new Button[PAGE_SIZE];
 
     public MarketScreen() {
         super(Component.literal("EarthMC Market"));
@@ -43,26 +44,30 @@ public final class MarketScreen extends Screen {
         int top = Math.max(6, (this.height - PANEL_H) / 2);
         search = new EditBox(this.font, left + 6, top + 25, 340, 20, Component.literal("Search item, town, nation, owner"));
         search.setHint(Component.literal("Search item / town / nation"));
+        GuiPreferences.State prefs = GuiPreferences.get();
+        search.setValue(prefs.marketQuery);
+        filter = prefs.marketFilter;
+        ascending = prefs.marketAscending;
+        availabilityFilter = prefs.marketStockFilter;
+        
         search.setResponder(s -> { page = 0; refresh(); });
         addRenderableWidget(search);
-        type = addRenderableWidget(Button.builder(Component.literal("ALL"), b -> {
+        type = addRenderableWidget(Button.builder(Component.literal(filter), b -> {
             filter = filter.equals("ALL") ? "SELL" : filter.equals("SELL") ? "BUY" : "ALL";
             type.setMessage(Component.literal(filter));
             page = 0; refresh();
         }).bounds(left + 353, top + 25, 65, 20).build());
-        direction = addRenderableWidget(Button.builder(Component.literal("Price ^"), b -> {
+        direction = addRenderableWidget(Button.builder(Component.literal(ascending ? "Price ^" : "Price v"), b -> {
             ascending = !ascending;
             direction.setMessage(Component.literal(ascending ? "Price ^" : "Price v"));
             page = 0; refresh();
         }).bounds(left + 426, top + 25, 122, 20).build());
-        availabilityButton = addRenderableWidget(Button.builder(Component.literal("Stock: ALL"), b -> {
+        availabilityButton = addRenderableWidget(Button.builder(Component.literal(stockFilterLabel()), b -> {
             availabilityFilter = (availabilityFilter + 1) % 4;
-            availabilityButton.setMessage(Component.literal(switch (availabilityFilter) {
-                case 1 -> "Stock: OK"; case 2 -> "Stock: ?"; case 3 -> "Stock: X"; default -> "Stock: ALL";
-            }));
+            availabilityButton.setMessage(Component.literal(stockFilterLabel()));
             page = 0; refresh();
         }).bounds(left + 315, top + 297, 110, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Arbitrage"), b -> this.minecraft.gui.setScreen(new ArbitrageScreen()))
+        addRenderableWidget(Button.builder(Component.literal("Arbitrage"), b -> { remember(); this.minecraft.gui.setScreen(new ArbitrageScreen()); })
             .bounds(left + 158, top + 297, 78, 20).build());
         previous = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> { page--; refresh(); })
             .bounds(left + 6, top + 297, 80, 20).build());
@@ -74,18 +79,20 @@ public final class MarketScreen extends Screen {
             final int row = i;
             int y = top + 70 + i * 25;
             locateButtons[i] = addRenderableWidget(Button.builder(Component.literal("H"), b -> highlight(row))
-                .bounds(left + 486, y, 18, 20).build());
+                .bounds(left + 483, y, 18, 20).build());
             townButtons[i] = addRenderableWidget(Button.builder(Component.literal("Go"), b -> openTravel(row, true))
-                .bounds(left + 508, y, 18, 20).build());
-            nationButtons[i] = addRenderableWidget(Button.builder(Component.literal("?"), b -> openTravel(row, false))
-                .bounds(left + 529, y, 18, 20).build());
+                .bounds(left + 505, y, 18, 20).build());
+            deleteButtons[i] = addRenderableWidget(Button.builder(Component.literal("Del"), b -> requestDelete(row))
+                .bounds(left + 531, y, 46, 20).build());
         }
+        page = prefs.marketPage;
         refresh();
     }
 
     private void highlight(int row) {
         EarthMarketClient.DisplayQuote q = rowQuotes[row];
         if (q == null) return;
+        remember();
         this.minecraft.gui.setScreen(null);
         EarthMarketClient.locateShop(q);
     }
@@ -94,6 +101,7 @@ public final class MarketScreen extends Screen {
     private void openTravel(int row, boolean ignored) {
         EarthMarketClient.DisplayQuote q = rowQuotes[row];
         if (q == null) return;
+        remember();
         CapitalTravelResolver.prepare(this.minecraft, q.town(), q.nation(), q);
     }
 
@@ -133,13 +141,35 @@ public final class MarketScreen extends Screen {
                 townButtons[i].visible = q != null;
                 townButtons[i].active = q != null && validDestination(q.town());
             }
-            if (nationButtons[i] != null) {
-                nationButtons[i].visible = false;
-                nationButtons[i].active = q != null && validDestination(q.nation());
+            if (deleteButtons[i] != null) {
+                deleteButtons[i].visible = q != null;
+                deleteButtons[i].active = q != null;
             }
         }
     }
 
+    private String stockFilterLabel() {
+        return switch (availabilityFilter) {
+            case 1 -> "Stock: OK"; case 2 -> "Stock: ?";
+            case 3 -> "Stock: X"; default -> "Stock: ALL";
+        };
+    }
+    private void remember() {
+        GuiPreferences.State p = GuiPreferences.get();
+        p.marketQuery = search == null ? "" : search.getValue();
+        p.marketFilter = filter;
+        p.marketAscending = ascending;
+        p.marketStockFilter = availabilityFilter;
+        p.marketPage = page;
+        GuiPreferences.save();
+    }
+    private void requestDelete(int row) {
+        EarthMarketClient.DisplayQuote q = rowQuotes[row];
+        if (q == null) return;
+        remember();
+        // A dedicated confirmation screen avoids accidentally removing the wrong row.
+        minecraft.gui.setScreen(new DeleteQuoteScreen(q, new MarketScreen()));
+    }
     private static String safe(String s) { return s == null ? "" : s; }
     private static boolean validDestination(String name) {
         String value = safe(name).strip();
@@ -209,9 +239,9 @@ public final class MarketScreen extends Screen {
         int pages = Math.max(1, (visible.size() + PAGE_SIZE - 1) / PAGE_SIZE);
         graphics.text(this.font, "Records: " + visible.size() + "   Page " + (page + 1) + "/" + pages,
             left + 6, top + 278, 0xFFE0E4EA, false);
-        graphics.text(this.font, "H: flash nearby shop box | T: town spawn | N: nation spawn (Enter to confirm)",
+        graphics.text(this.font, "H: highlight | Go: prepare teleport | Del: delete saved record",
             left + 6, top + 288, 0xFFFFBD7A, false);
     }
 
-    @Override public void onClose() { this.minecraft.gui.setScreen(null); }
+    @Override public void onClose() { remember(); this.minecraft.gui.setScreen(null); }
 }

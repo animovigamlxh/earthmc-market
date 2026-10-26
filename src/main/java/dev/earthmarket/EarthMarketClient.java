@@ -30,6 +30,8 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final Path IMPORT = DIRECTORY.resolve("import.json");
     private static final Path BACKUP = DIRECTORY.resolve("prices-backup.json");
     private static final Path SETTINGS = DIRECTORY.resolve("settings.json");
+    private static final Path DELETED_SIGNS = DIRECTORY.resolve("deleted-signs.json");
+    private static final Set<String> IGNORED_SIGNS = new HashSet<>();
     // Quiet by default: only an explicit /emprice scan reports its completion.
     private static boolean showAutoScanMessages = false;
     private static final List<Quote> QUOTES = new ArrayList<>();
@@ -103,6 +105,7 @@ public final class EarthMarketClient implements ClientModInitializer {
 
     @Override public void onInitializeClient() {
         load();
+        loadIgnoredSigns();
         loadSettings();
         SIGNS.setShowAutomaticMessages(showAutoScanMessages);
         ShopEspRenderer.register();
@@ -188,6 +191,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("locate").executes(ctx -> { locateUnknown(); return 1; }))
                 .then(literal("locdebug").executes(ctx -> { locationDebug(); return 1; }))
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
+                .then(literal("restoredeleted").executes(ctx -> { say("Restored " + restoreDeletedSigns() + " ignored sign locations; rescan nearby to rediscover them."); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
                 .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
@@ -353,6 +357,9 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     private static void foundSign(BlockPos pos, NearbySignScanner.Found found) {
+        if (pos == null) return;
+        var clientLevel = Minecraft.getInstance().level;
+        if (clientLevel != null && IGNORED_SIGNS.contains(signKey(clientLevel.dimension().toString(), pos.getX(), pos.getY(), pos.getZ(), found.side()))) return;
         var p = found.quote();
         String item = normalized(p.item());
         var level = Minecraft.getInstance().level;
@@ -575,7 +582,54 @@ public final class EarthMarketClient implements ClientModInitializer {
             q.available == null ? "?" : q.available, q.status == null ? "unknown" : q.status, q.source, q.updated);
     }
 
+    private static String signKey(String dim, int x, int y, int z, String side) {
+        return String.valueOf(dim) + "|" + x + "," + y + "," + z + "|" + String.valueOf(side);
+    }
+    private static void loadIgnoredSigns() {
+        IGNORED_SIGNS.clear();
+        try {
+            if (!Files.isRegularFile(DELETED_SIGNS)) return;
+            try (Reader r = Files.newBufferedReader(DELETED_SIGNS)) {
+                String[] keys = JSON.fromJson(r, String[].class);
+                if (keys != null) IGNORED_SIGNS.addAll(Arrays.asList(keys));
+            }
+        } catch (Exception e) { System.err.println("[EarthMarket] Failed to load deleted signs: " + e); }
+    }
+    private static void saveIgnoredSigns() {
+        try {
+            Files.createDirectories(DIRECTORY);
+            try (Writer w = Files.newBufferedWriter(DELETED_SIGNS)) { JSON.toJson(IGNORED_SIGNS, w); }
+        } catch (Exception e) { System.err.println("[EarthMarket] Failed to save deleted signs: " + e); }
+    }
+    /** Delete exactly one record selected in the GUI. Rescans won't restore deleted signs. */
+    public static boolean deleteQuote(String id) {
+        if (id == null || id.isBlank()) return false;
+        for (Iterator<Quote> it = QUOTES.iterator(); it.hasNext();) {
+            Quote q = it.next();
+            if (!id.equals(q.id)) continue;
+            if ("earthmc-sign".equals(q.source)) {
+                IGNORED_SIGNS.add(signKey(q.dimension, q.x, q.y, q.z, q.signSide));
+                saveIgnoredSigns();
+            }
+            it.remove();
+            SIGN_LOCATION_QUEUE.remove(q);
+            if (lastInspectedShop == q) lastInspectedShop = null;
+            if (enchantCaptureShop == q) enchantCaptureShop = null;
+            signDirty = false;
+            save();
+            return true;
+        }
+        return false;
+    }
+    public static int restoreDeletedSigns() {
+        int count = IGNORED_SIGNS.size();
+        IGNORED_SIGNS.clear();
+        saveIgnoredSigns();
+        return count;
+    }
+
     private static void upsert(Quote q) {
+        if (q.id == null || q.id.isBlank()) q.id = UUID.randomUUID().toString();
         QUOTES.removeIf(old -> {
             if ("earthmc-sign".equals(q.source)) {
                 // Same sign identity requires dimension + exact block + sign face.
@@ -629,7 +683,10 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (!Files.exists(DATABASE)) return;
             try (Reader reader = Files.newBufferedReader(DATABASE)) {
                 Quote[] parsed = JSON.fromJson(reader, Quote[].class);
-                if (parsed != null) for (Quote q : parsed) if (valid(q)) QUOTES.add(q);
+                if (parsed != null) for (Quote q : parsed) if (valid(q)) {
+                    if (q.id == null || q.id.isBlank()) q.id = UUID.randomUUID().toString();
+                    QUOTES.add(q);
+                }
             }
         } catch (Exception e) { System.err.println("[EarthMarket] Could not read prices: " + e); }
     }
@@ -664,7 +721,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     // Immutable read-only snapshots for the UI; never expose mutable database objects.
-    public record DisplayQuote(String item, String type, String shop, double unitPrice,
+    public record DisplayQuote(String id, String item, String type, String shop, double unitPrice,
                                double bundlePrice, int amount, Integer available, Integer signLots, String status,
                                String town, String nation, String updated, String accuracy, String source, String enchantments,
                                int x, int y, int z, String dimension) {}
@@ -678,7 +735,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         List<DisplayQuote> result = new ArrayList<>();
         for (Quote q : QUOTES) {
             if (!valid(q)) continue;
-            result.add(new DisplayQuote(q.item, q.type, q.shop, q.price / q.amount,
+            result.add(new DisplayQuote(q.id, q.item, q.type, q.shop, q.price / q.amount,
                 q.price, q.amount, q.available, q.signLots, q.status, q.town, q.nation,
                 q.updated, q.locationAccuracy, q.source, q.enchantments,
                 q.x, q.y, q.z, q.dimension));
@@ -687,7 +744,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     private static class Quote {
-        String item, type, shop, source, updated;
+        String id, item, type, shop, source, updated;
         double price;
         int amount, x, y, z;
         Integer available;
