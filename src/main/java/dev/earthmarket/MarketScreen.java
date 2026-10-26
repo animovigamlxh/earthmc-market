@@ -34,6 +34,7 @@ public final class MarketScreen extends Screen {
     private final Button[] nationButtons = new Button[PAGE_SIZE];
     private final Button[] deleteButtons = new Button[PAGE_SIZE];
     private final Button[] detailsButtons = new Button[PAGE_SIZE];
+    private final Button[] compareButtons = new Button[PAGE_SIZE];
 
     public MarketScreen() {
         super(Component.literal("EarthMC Market"));
@@ -80,6 +81,8 @@ public final class MarketScreen extends Screen {
             final int row = i;
             int y = top + 70 + i * 25;
             detailsButtons[i] = addRenderableWidget(Button.builder(Component.literal("i"), b -> showDetails(row))
+                .bounds(left + 442, y, 17, 20).build());
+            compareButtons[i] = addRenderableWidget(Button.builder(Component.literal("C"), b -> compare(row))
                 .bounds(left + 462, y, 17, 20).build());
             locateButtons[i] = addRenderableWidget(Button.builder(Component.literal("H"), b -> highlight(row))
                 .bounds(left + 483, y, 18, 20).build());
@@ -90,6 +93,13 @@ public final class MarketScreen extends Screen {
         }
         page = prefs.marketPage;
         refresh();
+    }
+
+    private void compare(int row) {
+        EarthMarketClient.DisplayQuote q = rowQuotes[row];
+        if (q == null) return;
+        remember();
+        this.minecraft.gui.setScreen(new SingleItemCompareScreen(q, new MarketScreen()));
     }
 
     private void showDetails(int row) {
@@ -145,6 +155,10 @@ public final class MarketScreen extends Screen {
             if (detailsButtons[i] != null) {
                 detailsButtons[i].visible = q != null;
                 detailsButtons[i].active = q != null;
+            }
+            if (compareButtons[i] != null) {
+                compareButtons[i].visible = q != null;
+                compareButtons[i].active = q != null;
             }
             if (locateButtons[i] != null) {
                 locateButtons[i].visible = q != null;
@@ -253,7 +267,7 @@ public final class MarketScreen extends Screen {
         int pages = Math.max(1, (visible.size() + PAGE_SIZE - 1) / PAGE_SIZE);
         graphics.text(this.font, "Records: " + visible.size() + "   Page " + (page + 1) + "/" + pages,
             left + 6, top + 278, 0xFFE0E4EA, false);
-        graphics.text(this.font, "i: full details | H: highlight | Go: teleport | Del: delete",
+        graphics.text(this.font, "C: compare buy/sell shops | i: details | H: highlight | Go: travel",
             left + 6, top + 288, 0xFFFFBD7A, false);
     }
 
