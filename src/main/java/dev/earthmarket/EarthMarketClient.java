@@ -702,6 +702,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     }
 
     public static void locateShop(DisplayQuote q) {
+        say(ShopLocator.coordinates(q));
         say(ShopLocator.start(q));
     }
 

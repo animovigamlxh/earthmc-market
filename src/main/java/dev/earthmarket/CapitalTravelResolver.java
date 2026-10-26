@@ -31,6 +31,7 @@ public final class CapitalTravelResolver {
         prepare(mc, town, nation, null);
     }
     public static void prepare(Minecraft mc, String town, String nation, EarthMarketClient.DisplayQuote shop) {
+        if (shop != null) notify(mc, "Travel target: " + ShopLocator.coordinates(shop));
         if (!valid(town)) { notify(mc, "Shop town is unknown; cannot choose a teleport command."); return; }
         String key = town.toLowerCase(Locale.ROOT);
         Cached cached = CACHE.get(key);
@@ -79,7 +80,9 @@ public final class CapitalTravelResolver {
             return;
         }
         String command = capital ? "/n spawn " + nation : "/t spawn " + town;
-        if (shop != null) PendingShopTravel.arm(shop, command);
+        if (shop != null) {
+            PendingShopTravel.arm(shop, command);
+        }
         mc.gui.setScreen(new ChatScreen(command, false));
     }
     private static void notify(Minecraft mc, String message) {

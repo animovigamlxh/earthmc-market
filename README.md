@@ -270,3 +270,7 @@ Fix recursive client chat handling: ignore locally emitted `[EM Market]` message
 - Press **Del** next to an observation and confirm to delete only that record from `prices.json`.
 - Deleted physical sign locations are suppressed from automatic rescan and stored in `config/earthmc-market/deleted-signs.json`. `/emprice restoredeleted` clears this suppression list (the next scan can rediscover those shops).
 - Non-sign historical records are removed directly; a newly observed real trade may create a new observation later. Back up `prices.json` before mass deletions.
+
+### v0.5.17 Position hints
+
+GUI Go / Go Buy / Go Sell and H now print the saved sign coordinates in local chat even when the shop chunk is not loaded. If the client has loaded the shop and finds a unique nearby chest/barrel, its coordinates are printed as **estimated**, alongside the sign position. Unknown or legacy coordinates are explicitly labeled as unverified; no remote chest coordinate is invented.
