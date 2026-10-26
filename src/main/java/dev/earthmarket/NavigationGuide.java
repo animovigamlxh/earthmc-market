@@ -26,6 +26,10 @@ public final class NavigationGuide {
     }
 
     public static void clear() { target = null; expiresAt = 0L; }
+    /** The single active navigation target, or null when the guide has expired. */
+    public static EarthMarketClient.DisplayQuote traceTarget() {
+        return active() ? target : null;
+    }
     public static boolean active() { return target != null && System.currentTimeMillis() < expiresAt; }
 
     public static void tick(Minecraft mc) {
