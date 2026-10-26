@@ -24,6 +24,13 @@ final class QuoteDetailScreen extends Screen {
         append("类型", q.type());
         String key = q.variantKey();
         String desc = q.variantDescription();
+        HoverVariantReader.Identity upgraded = HoverVariantReader.upgradeLegacy(key, desc);
+        if (upgraded != null) { key = upgraded.key(); desc = upgraded.label(); }
+        if (key != null && key.contains(":") && !key.startsWith("template#")) {
+            String itemId = key.split("#",2)[0];
+            append("Minecraft 物品 ID", itemId);
+            if (itemId.contains(":music_disc_")) append("唱片名称", HoverVariantReader.friendlyLabel(itemId));
+        }
         boolean identified = key != null && !key.isBlank();
         append("变种识别状态", identified ? "已捕获物品数据" : "未捕获精确物品数据（无法确认具体变种）");
         append("变种描述", desc == null || desc.isBlank() ? "无" : desc);

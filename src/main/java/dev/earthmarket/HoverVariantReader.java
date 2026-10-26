@@ -4,6 +4,8 @@ import net.minecraft.network.chat.Component;
 import java.lang.reflect.*;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.*;
 
 /** Best-effort decoder of QuickShop's SHOW_ITEM hover preview.
@@ -11,6 +13,56 @@ import java.util.*;
  *  versioned chat event classes. Failures never interrupt chat processing. */
 public final class HoverVariantReader {
     private HoverVariantReader() {}
+    private static final Pattern ITEM_PATH = Pattern.compile("(?:minecraft:item\\s*/\\s*)?((?:[a-z0-9_.-]+:)?[a-z0-9_./-]+)");
+    private static final Pattern RESOURCE_KEY_ITEM = Pattern.compile("(?:[a-z0-9_.-]+:)?item\\s*/\\s*((?:[a-z0-9_.-]+:)?[a-z0-9_./-]+)");
+    private static final Pattern NAMED_ITEM = Pattern.compile("(?<![a-z0-9_])((?:[a-z0-9_.-]+:)?(?:music_disc_[a-z0-9_]+|enchanted_book|potion|splash_potion|lingering_potion|tipped_arrow))");
+
+    /** Extract a namespaced registry ID instead of persisting Java Holder/Reference.toString(). */
+    static String canonicalItemId(Object reference) {
+        if (reference == null) return null;
+        Object key = first(reference, "unwrapKey", "getKey", "key", "location");
+        if (key instanceof Optional<?> opt) key = opt.orElse(null);
+        Object location = key == null ? null : first(key, "location", "getLocation");
+        if (location != null) {
+            String id = normalizeId(location.toString());
+            if (id != null) return id;
+        }
+        String raw = String.valueOf(reference).toLowerCase(Locale.ROOT);
+        Matcher m = RESOURCE_KEY_ITEM.matcher(raw);
+        if (m.find()) return normalizeId(m.group(1));
+        m = NAMED_ITEM.matcher(raw);
+        if (m.find()) return normalizeId(m.group(1));
+        // A ResourceLocation can stringify directly to namespace:path.
+        if (raw.matches("[a-z0-9_.-]+:[a-z0-9_./-]+")) return raw;
+        return null;
+    }
+    private static String normalizeId(String raw) {
+        if (raw == null) return null;
+        String value = raw.strip().toLowerCase(Locale.ROOT);
+        if (!value.matches("(?:[a-z0-9_.-]+:)?[a-z0-9_./-]+")) return null;
+        return value.contains(":") ? value : "minecraft:" + value;
+    }
+    public static String idFromLegacyDescription(String legacy) {
+        return canonicalItemId(legacy);
+    }
+    public static String friendlyLabel(String itemId) {
+        if (itemId == null) return "";
+        String name = itemId.substring(itemId.indexOf(':') + 1);
+        if (name.startsWith("music_disc_")) {
+            String title = name.substring("music_disc_".length());
+            return "音乐唱片 — " + title.substring(0,1).toUpperCase(Locale.ROOT) + title.substring(1).replace('_',' ');
+        }
+        return name.replace('_', ' ');
+    }
+    public static Identity upgradeLegacy(String key, String label) {
+        if (key == null || !key.startsWith("template#")) return null;
+        String id = idFromLegacyDescription(label);
+        if (id == null) return null;
+        // Legacy template hash was computed over JVM string dumps. Preserve that suffix
+        // for variants where components may matter; vanilla discs have unique IDs.
+        boolean disc = id.contains(":music_disc_");
+        return new Identity(disc ? id : id + "#legacy:" + key.substring(9), friendlyLabel(id));
+    }
     public record Identity(String key, String label) {}
 
     public static Identity fromMessage(Component message) {
@@ -67,19 +119,23 @@ public final class HoverVariantReader {
             if (stack == null) return null;
             // 26.2 SHOW_ITEM uses ItemStackTemplate, not ItemStack.
             if (stack.getClass().getSimpleName().contains("ItemStackTemplate")) {
-                String payload = String.valueOf(stack);
-                // The template contains the precise item ID and data components, but no
-                // transaction amount. Do not identify it merely by translated display name.
-                if (payload.isBlank()) return null;
                 Object identity = first(stack, "item", "getItem");
-                String id = identity == null ? "template" : String.valueOf(identity);
-                String label = id.length() > 80 ? id.substring(0, 80) : id;
-                return new Identity("template#" + digest(payload), label);
+                String id = canonicalItemId(identity);
+                if (id == null) return null; // Unknown ID is NOT an exact match.
+                Object components = first(stack, "components", "getComponents", "getComponentsPatch");
+                String payload = components == null ? "" : String.valueOf(components);
+                // Never hash the entire template dump: it includes Java Holder representations.
+                // For complex items retain a digest of their data components, excluding count.
+                String normalized = payload.strip();
+                boolean plain = normalized.isEmpty() || normalized.equals("{}") || normalized.equals("[]") || normalized.equals("DataComponentPatch{}");
+                String key = id + (plain ? "" : "#components:" + digest(normalized));
+                return new Identity(key, friendlyLabel(id));
             }
             if (!stack.getClass().getSimpleName().contains("ItemStack")) return null;
             Object item = call(stack, "getItem");
             if (item == null) return null;
-            String itemId = itemId(item);
+            String itemId = canonicalItemId(item);
+            if (itemId == null) itemId = itemId(item);
             if (itemId == null) return null;
             Object patch = call(stack, "getComponentsPatch");
             if (patch == null) patch = call(stack, "getComponents");
@@ -87,7 +143,7 @@ public final class HoverVariantReader {
             // Ignore number of items in preview; only identity/components matter.
             String key = itemId + (data.isBlank() || data.equals("{}") ? "" : "#" + digest(data));
             Object name = call(stack, "getHoverName");
-            String label = name instanceof Component c ? c.getString() : itemId.substring(itemId.indexOf(':')+1);
+            String label = name instanceof Component c ? c.getString() : friendlyLabel(itemId);
             if (label.length() > 80) label = label.substring(0, 80);
             return new Identity(key, label);
         } catch (RuntimeException ignored) { return null; }

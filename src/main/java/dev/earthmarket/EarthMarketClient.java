@@ -769,14 +769,25 @@ public final class EarthMarketClient implements ClientModInitializer {
         String suffix = q.enchantments() == null ? "" : q.enchantments().strip();
         String base = q.item() == null ? "" : q.item();
         String variant = q.variantDescription() == null ? "" : q.variantDescription().strip();
-        String label = variant.isEmpty() ? base : base + " [" + variant + "]";
+        HoverVariantReader.Identity upgraded = HoverVariantReader.upgradeLegacy(q.variantKey(), variant);
+        if (upgraded != null) variant = upgraded.label();
+        String label = variant.isEmpty() ? base : (variant.startsWith("音乐唱片") ? variant : base + " [" + variant + "]");
         return suffix.isEmpty() ? label : label + " [" + suffix + "]";
+    }
+
+    private static void normalizeExistingVariant(Quote q) {
+        HoverVariantReader.Identity upgraded = HoverVariantReader.upgradeLegacy(q.variantKey, q.variantDescription);
+        if (upgraded != null) {
+            q.variantKey = upgraded.key();
+            q.variantDescription = upgraded.label();
+        }
     }
 
     public static List<DisplayQuote> displayQuotes() {
         List<DisplayQuote> result = new ArrayList<>();
         for (Quote q : QUOTES) {
             if (!valid(q)) continue;
+            normalizeExistingVariant(q);
             result.add(new DisplayQuote(q.id, q.item, q.type, q.shop, q.price / q.amount,
                 q.price, q.amount, q.available, q.signLots, q.status, q.town, q.nation,
                 q.updated, q.locationAccuracy, q.source, q.enchantments,
