@@ -17,6 +17,23 @@ public final class HoverVariantReader {
         if (message == null) return null;
         return inspect(message, 0);
     }
+    public static String describe(Component message) {
+        if (message == null) return "none";
+        StringBuilder out = new StringBuilder();
+        describePart(message, 0, out);
+        return out.length() == 0 ? "none" : out.substring(0, Math.min(out.length(), 180));
+    }
+    private static void describePart(Component part, int depth, StringBuilder out) {
+        if (depth > 24) return;
+        Object hover = part.getStyle().getHoverEvent();
+        if (hover != null) {
+            if (out.length() > 0) out.append("; ");
+            out.append(hover.getClass().getSimpleName());
+            Object val = call(hover, "item");
+            if (val != null) out.append(" payload=").append(val.getClass().getSimpleName());
+        }
+        for (Component child : part.getSiblings()) describePart(child, depth+1, out);
+    }
     private static Identity inspect(Component part, int depth) {
         if (depth > 24) return null;
         try {
@@ -47,7 +64,19 @@ public final class HoverVariantReader {
                 return null;
             }
             if (stack instanceof Optional<?> optional) stack = optional.orElse(null);
-            if (stack == null || !stack.getClass().getSimpleName().contains("ItemStack")) return null;
+            if (stack == null) return null;
+            // 26.2 SHOW_ITEM uses ItemStackTemplate, not ItemStack.
+            if (stack.getClass().getSimpleName().contains("ItemStackTemplate")) {
+                String payload = String.valueOf(stack);
+                // The template contains the precise item ID and data components, but no
+                // transaction amount. Do not identify it merely by translated display name.
+                if (payload.isBlank()) return null;
+                Object identity = first(stack, "item", "getItem");
+                String id = identity == null ? "template" : String.valueOf(identity);
+                String label = id.length() > 80 ? id.substring(0, 80) : id;
+                return new Identity("template#" + digest(payload), label);
+            }
+            if (!stack.getClass().getSimpleName().contains("ItemStack")) return null;
             Object item = call(stack, "getItem");
             if (item == null) return null;
             String itemId = itemId(item);

@@ -47,6 +47,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static String scanFingerprint = "";
     private static HoverVariantReader.Identity pendingHoverVariant;
     private static long hoverSeenAt;
+    private static String hoverDiagnostics = "No hover event observed yet";
     private static Quote lastInspectedShop;
     private static final EnchantChatParser ENCHANT_CHAT = new EnchantChatParser();
     private static long enchantCaptureDeadline = 0L;
@@ -193,6 +194,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("locate").executes(ctx -> { locateUnknown(); return 1; }))
                 .then(literal("locdebug").executes(ctx -> { locationDebug(); return 1; }))
                 .then(literal("backup").executes(ctx -> { backup(); return 1; }))
+                .then(literal("hoverdebug").executes(ctx -> { say("Hover debug: " + hoverDiagnostics); return 1; }))
                 .then(literal("restoredeleted").executes(ctx -> { say("Restored " + restoreDeletedSigns() + " ignored sign locations; rescan nearby to rediscover them."); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
@@ -203,6 +205,8 @@ public final class EarthMarketClient implements ClientModInitializer {
             String received = message.getString();
             // Read structured hover metadata before flattening the component to text.
             HoverVariantReader.Identity preview = HoverVariantReader.fromMessage(message);
+            String hoverInfo = HoverVariantReader.describe(message);
+            if (!"none".equals(hoverInfo)) hoverDiagnostics = hoverInfo;
             if (preview != null && (received.contains("物品") || received.contains("预览") || received.contains("价格"))) {
                 pendingHoverVariant = preview;
                 hoverSeenAt = System.currentTimeMillis();
@@ -210,6 +214,14 @@ public final class EarthMarketClient implements ClientModInitializer {
             // sendSystemMessage also fires this receive event. Never parse our own output.
             if (received.startsWith("[EM Market] ")) return;
             inspectShopMessage(received);
+            // A separate preview message can arrive AFTER the shop block was finalized.
+            if (preview != null && lastInspectedShop != null &&
+                    System.currentTimeMillis() - scanStartedAt < 5000L &&
+                    (lastInspectedShop.variantKey == null || lastInspectedShop.variantKey.isBlank())) {
+                lastInspectedShop.variantKey = preview.key();
+                lastInspectedShop.variantDescription = preview.label();
+                save();
+            }
             captureEnchantMessage(received);
             Matcher match = SHOP_LINE.matcher(received);
             if (!match.find()) return;
@@ -234,8 +246,10 @@ public final class EarthMarketClient implements ClientModInitializer {
             finishEnchantCapture();
             CHAT_SCAN.setLength(0);
             scanFingerprint = "";
-            pendingHoverVariant = null;
-            hoverSeenAt = 0;
+            // Do not discard preview data captured on the same heading message.
+            if (System.currentTimeMillis() - hoverSeenAt > 5000L) {
+                pendingHoverVariant = null; hoverSeenAt = 0L;
+            }
             scanStartedAt = System.currentTimeMillis();
             var player = Minecraft.getInstance().player;
             if (player == null) return;
