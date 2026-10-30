@@ -274,3 +274,10 @@ Fix recursive client chat handling: ignore locally emitted `[EM Market]` message
 ### v0.5.17 Position hints
 
 GUI Go / Go Buy / Go Sell and H now print the saved sign coordinates in local chat even when the shop chunk is not loaded. If the client has loaded the shop and finds a unique nearby chest/barrel, its coordinates are printed as **estimated**, alongside the sign position. Unknown or legacy coordinates are explicitly labeled as unverified; no remote chest coordinate is invented.
+
+
+### v0.5.27 — Longer ESP and non-mutating QuickShop inspection
+- ESP target outline is now 18 seconds (360 ticks).
+- Going to a shop is navigation only: it does not mark any transaction or consume stock.
+- Left-click inspection enriches a matching sign record with item identity but **does not override** sign-observed price, lots, available items or tradeable status. Re-scan nearby signs to refresh live prices and lots.
+- Known item variants are still deliberately kept separate from unknown variants; clicking a sign can reveal previously unknown metadata, which may move a listing between variant-specific comparison groups.

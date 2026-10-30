@@ -376,17 +376,15 @@ public final class EarthMarketClient implements ClientModInitializer {
             else if (dist == bestDistance) ambiguous = true;
         }
         if (candidate == null || ambiguous) return null;
-        // A sign may display stale price while QuickShop provides current price and inventory.
-        candidate.price = inspected.price;
-        candidate.amount = inspected.amount;
-        candidate.available = inspected.available;
-        if (inspected.variantKey != null) {
+        // A left-click is an INSPECTION, not a completed buy/sell transaction.
+        // Never replace the live sign lots, item units, trading state or price with
+        // a chat inspection snapshot: doing so can make the quote vanish from
+        // price comparison even though no trade happened.
+        if (inspected.variantKey != null && !Objects.equals(candidate.variantKey, inspected.variantKey)) {
             candidate.variantKey = inspected.variantKey;
             candidate.variantDescription = inspected.variantDescription;
+            candidate.updated = inspected.updated;
         }
-        candidate.status = inspected.status;
-        candidate.stockVerifiedAt = inspected.updated;
-        candidate.updated = inspected.updated;
         if (candidate.enchantments == null || candidate.enchantments.isBlank())
             candidate.enchantments = inspected.enchantments;
         return candidate;

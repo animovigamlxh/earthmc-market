@@ -44,12 +44,12 @@ public final class ShopLocator {
         markerIsSign = found == null || tied != 1;
         target = markerIsSign ? sign : found;
         dimension = mc.level.dimension().toString();
-        ticksLeft = 120;
+        ticksLeft = 18 * 20;
         age = 0;
         NavigationGuide.clear();
         return markerIsSign
-            ? "Multiple/no matching containers; outlining SHOP SIGN at " + sign.toShortString() + " for 6 seconds."
-            : "Highlighting container at " + found.toShortString() + " for 6 seconds.";
+            ? "Multiple/no matching containers; outlining SHOP SIGN at " + sign.toShortString() + " for 18 seconds."
+            : "Highlighting container at " + found.toShortString() + " for 18 seconds.";
     }
 
     /** Always report the saved location; it is a sign/block position, not necessarily a chest. */
