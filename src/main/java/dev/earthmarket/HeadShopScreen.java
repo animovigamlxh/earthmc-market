@@ -11,6 +11,9 @@ import net.minecraft.core.BlockPos;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import net.minecraft.client.gui.screens.ChatScreen;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -26,6 +29,8 @@ public final class HeadShopScreen extends Screen {
     private final Entry[] rows = new Entry[ROWS];
     private final Button[] details = new Button[ROWS];
     private final Button[] go = new Button[ROWS];
+    private final Button[] townButtons = new Button[ROWS];
+    private final Button[] nationButtons = new Button[ROWS];
     private Button backPage, nextPage;
     private EditBox search;
     private static String previousQuery = "";
@@ -34,6 +39,7 @@ public final class HeadShopScreen extends Screen {
     private Button favoritesFilter;
     private static boolean onlyFavorites = false;
     private List<Entry> entries = List.of();
+    private List<Entry> catalogueEntries = List.of();
 
     public HeadShopScreen(Screen previous) {
         super(Component.literal("EarthMC Head Shops"));
@@ -47,15 +53,15 @@ public final class HeadShopScreen extends Screen {
         search = new EditBox(this.font,x+7,y+41,310,19,Component.literal("Search head name"));
         search.setHint(Component.literal("Search head name / fingerprint"));
         search.setValue(previousQuery);
-        search.setResponder(value -> { previousQuery=value; page=0; refresh(); });
+        search.setResponder(value -> { previousQuery=value; page=0; filterEntries(); });
         addRenderableWidget(search);
-        favoritesFilter = addRenderableWidget(Button.builder(Component.literal(""), b -> {onlyFavorites=!onlyFavorites;page=0;refresh();})
+        favoritesFilter = addRenderableWidget(Button.builder(Component.literal(""), b -> {onlyFavorites=!onlyFavorites;page=0;filterEntries();})
             .bounds(x+323,y+41,145,19).build());
         backPage = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; updatePage();})
             .bounds(x+7,y+HEIGHT-27,75,20).build());
         nextPage = addRenderableWidget(Button.builder(Component.literal("Next >"), b -> {page++; updatePage();})
             .bounds(x+WIDTH-83,y+HEIGHT-27,75,20).build());
-        addRenderableWidget(Button.builder(Component.literal("Refresh frames"), b -> {HeadCatalogue.scan(minecraft); refresh();})
+        addRenderableWidget(Button.builder(Component.literal("Refresh frames"), b -> {HeadCatalogue.scan(minecraft); rebuildCatalogue();})
             .bounds(x+102,y+HEIGHT-27,130,20).build());
         addRenderableWidget(Button.builder(Component.literal("Back"), b -> minecraft.gui.setScreen(previous))
             .bounds(x+250,y+HEIGHT-27,82,20).build());
@@ -63,64 +69,125 @@ public final class HeadShopScreen extends Screen {
             final int row=i;
             int ry=y+83+i*30;
             favoriteButtons[i]=addRenderableWidget(Button.builder(Component.literal("☆"),b -> toggleFavorite(row))
-                .bounds(x+450,ry,23,20).build());
+                .bounds(x+414,ry,22,20).build());
             details[i]=addRenderableWidget(Button.builder(Component.literal("i"),b -> info(row))
-                .bounds(x+477,ry,23,20).build());
+                .bounds(x+440,ry,22,20).build());
             highlight[i]=addRenderableWidget(Button.builder(Component.literal("H"),b -> mark(row))
-                .bounds(x+504,ry,23,20).build());
+                .bounds(x+466,ry,22,20).build());
+            townButtons[i]=addRenderableWidget(Button.builder(Component.literal("T"),b -> travelExplicit(row,false))
+                .bounds(x+492,ry,22,20).build());
+            nationButtons[i]=addRenderableWidget(Button.builder(Component.literal("N"),b -> travelExplicit(row,true))
+                .bounds(x+518,ry,22,20).build());
             go[i]=addRenderableWidget(Button.builder(Component.literal("Go"),b -> travel(row))
-                .bounds(x+531,ry,45,20).build());
+                .bounds(x+544,ry,35,20).build());
         }
-        refresh();
+        rebuildCatalogue();
     }
 
-    private void refresh() {
+    /** A costly world/quote join is done only on opening or explicit refresh, never when typing. */
+    private void rebuildCatalogue() {
         Minecraft mc=Minecraft.getInstance();
-        if (!EarthMarketClient.isEarthMc(mc)) {entries=List.of(); return;}
+        if (!EarthMarketClient.isEarthMc(mc) || mc.level==null) {
+            catalogueEntries=List.of(); filterEntries(); return;
+        }
         List<HeadCatalogue.SavedHead> frames=HeadCatalogue.all();
-        String query=search==null?previousQuery:search.getValue();
-        query=query.strip().toLowerCase(Locale.ROOT);
         List<EarthMarketClient.DisplayQuote> quotes=EarthMarketClient.displayQuotes();
-        String dim=mc.level.dimension().toString();
-        List<Entry> found=new ArrayList<>();
-        for (HeadCatalogue.SavedHead stored: frames) {
+        // Spatial bucket index: query just nearby signs, not the entire historical price catalogue.
+        Map<String,List<EarthMarketClient.DisplayQuote>> buckets=new HashMap<>();
+        for(EarthMarketClient.DisplayQuote q:quotes) {
+            if(!"earthmc-sign".equals(q.source()) || q.dimension()==null) continue;
+            String key=bucket(q.dimension(),q.x(),q.y(),q.z());
+            buckets.computeIfAbsent(key,k->new ArrayList<>()).add(q);
+        }
+        List<Entry> built=new ArrayList<>(frames.size());
+        for(HeadCatalogue.SavedHead stored:frames) {
             HeadFrameScanner.Head head=stored.asHead();
-            if (!query.isEmpty() && !(head.displayName().toLowerCase(Locale.ROOT).contains(query)
-                || head.fingerprint().toLowerCase(Locale.ROOT).contains(query))) continue;
+            BlockPos p=head.position();
             List<EarthMarketClient.DisplayQuote> nearby=new ArrayList<>();
-            for (EarthMarketClient.DisplayQuote q:quotes) {
-                if (!"earthmc-sign".equals(q.source()) || !Objects.equals(stored.dimension,q.dimension())) continue;
-                // In real EarthMC redstone head shops the sign may sell a placeholder item
-                // (e.g. a map). Proximity is evidence of a candidate, NOT proof of linkage.
-                int dx=Math.abs(q.x()-head.position().getX());
-                int dy=Math.abs(q.y()-head.position().getY());
-                int dz=Math.abs(q.z()-head.position().getZ());
-                if (dx<=2 && dy<=4 && dz<=2) nearby.add(q);
+            int bx=Math.floorDiv(p.getX(),8),by=Math.floorDiv(p.getY(),8),bz=Math.floorDiv(p.getZ(),8);
+            for(int dx=-1;dx<=1;dx++)for(int dy=-1;dy<=1;dy++)for(int dz=-1;dz<=1;dz++) {
+                String key=stored.dimension+":"+(bx+dx)+":"+(by+dy)+":"+(bz+dz);
+                for(EarthMarketClient.DisplayQuote q:buckets.getOrDefault(key,List.of())) {
+                    if(Math.abs(q.x()-p.getX())<=5 && Math.abs(q.y()-p.getY())<=5 && Math.abs(q.z()-p.getZ())<=5)
+                        nearby.add(q);
+                }
             }
-            nearby.sort(Comparator.comparingInt(q -> distance2(q,head.position())));
+            // A redstone head shop is usually a vertical stack: frame above/below payment sign.
+            // Favor the exact X/Z column before any nearby sign; never treat diagonal proximity
+            // as proof of the payment connection.
+            List<EarthMarketClient.DisplayQuote> aligned=new ArrayList<>();
+            for(EarthMarketClient.DisplayQuote q:nearby)
+                if(q.x()==p.getX() && q.z()==p.getZ() && q.y()!=p.getY()) aligned.add(q);
+            EarthMarketClient.DisplayQuote below=closestVertical(aligned,p,true);
+            EarthMarketClient.DisplayQuote above=closestVertical(aligned,p,false);
             EarthMarketClient.DisplayQuote candidate=null;
-            String status="No nearby payment sign";
-            if (nearby.size()==1) {candidate=nearby.get(0);status="Possible payment (unverified)";}
-            else if (nearby.size()>1) {
-                // A unique position-aligned sign is a useful lead, but still just a candidate.
-                int best=distance2(nearby.get(0),head.position());
-                int second=distance2(nearby.get(1),head.position());
-                if (best<second && nearby.get(0).x()==head.position().getX()
-                    && nearby.get(0).z()==head.position().getZ()) {
-                    candidate=nearby.get(0);status="Aligned payment candidate (unverified)";
-                } else status="Multiple payment signs: unconfirmed";
+            String status="No aligned payment sign / scan signs nearby";
+            if(below!=null && above==null) {
+                candidate=below; status="Payment sign below (vertical match; unverified)";
+            } else if(above!=null && below==null) {
+                candidate=above; status="Payment sign above (vertical match; unverified)";
+            } else if(below!=null) {
+                // If a head is present *above* the upper sign, that upper sign most likely
+                // serves the other head. This head uses the lower sign instead.
+                boolean headAboveUpper=false;
+                for(HeadCatalogue.SavedHead other:frames) {
+                    if(other==stored || !stored.dimension.equals(other.dimension))continue;
+                    BlockPos op=other.pos();
+                    if(op.getX()==p.getX() && op.getZ()==p.getZ()
+                        && op.getY()>above.y() && op.getY()-above.y()<=5) {
+                        headAboveUpper=true; break;
+                    }
+                }
+                if(headAboveUpper) {
+                    candidate=below;status="Lower sign; upper sign serves head above (inferred)";
+                } else {
+                    int down=p.getY()-below.y(),up=above.y()-p.getY();
+                    if(down<=up) {candidate=below;status="Lower aligned sign preferred (unverified)";}
+                    else {candidate=above;status="Nearest upper aligned sign (unverified)";}
+                }
+            } else if(nearby.size()==1) {
+                // A side-by-side head shop can exist, but don't label a nearby sign trusted.
+                candidate=nearby.get(0);status="Nearby off-axis payment candidate (unverified)";
+            } else if(nearby.size()>1) {
+                status="Multiple off-axis payment signs: unconfirmed";
             }
-            found.add(new Entry(head,candidate,status,false));
+            built.add(new Entry(head,candidate,status,false));
         }
-        if(onlyFavorites) {
-            found.removeIf(e -> !HeadFavorites.contains(e.head().displayName(),e.head().fingerprint()));
-            // Keep favorite products in the wishlist even after their last observed frame is gone.
-            for(HeadFavorites.Favorite fav : HeadFavorites.all()) {
-                boolean present=found.stream().anyMatch(e -> HeadFavorites.id(e.head().displayName(),e.head().fingerprint()).equals(fav.id));
-                if(!present) found.add(new Entry(new HeadFrameScanner.Head(BlockPos.ZERO,fav.name,fav.fingerprint,false),null,"No currently listed head (wishlist)",true));
-            }
+        built.sort(Comparator.comparing(e->e.head().displayName().toLowerCase(Locale.ROOT)));
+        catalogueEntries=built;
+        filterEntries();
+    }
+    private static EarthMarketClient.DisplayQuote closestVertical(
+        List<EarthMarketClient.DisplayQuote> signs,BlockPos frame,boolean below) {
+        EarthMarketClient.DisplayQuote nearest=null;
+        int best=Integer.MAX_VALUE;
+        for(EarthMarketClient.DisplayQuote q:signs) {
+            int dy=below?frame.getY()-q.y():q.y()-frame.getY();
+            if(dy<=0 || dy>5)continue;
+            if(dy<best) {best=dy;nearest=q;}
         }
-        found.sort(Comparator.comparing(e -> e.head().displayName().toLowerCase(Locale.ROOT)));
+        return nearest;
+    }
+    private static String bucket(String dimension,int x,int y,int z) {
+        return dimension+":"+Math.floorDiv(x,8)+":"+Math.floorDiv(y,8)+":"+Math.floorDiv(z,8);
+    }
+    /** Search, favorites and paging operate on cached rows, no world scans or quote joins. */
+    private void filterEntries() {
+        String query=(search==null?previousQuery:search.getValue()).strip().toLowerCase(Locale.ROOT);
+        List<Entry> found=new ArrayList<>();
+        for(Entry e:catalogueEntries) {
+            if(!query.isEmpty() && !e.head().displayName().toLowerCase(Locale.ROOT).contains(query)
+                && !e.head().fingerprint().toLowerCase(Locale.ROOT).contains(query))continue;
+            if(onlyFavorites && !HeadFavorites.contains(e.head().displayName(),e.head().fingerprint()))continue;
+            found.add(e);
+        }
+        if(onlyFavorites) for(HeadFavorites.Favorite fav:HeadFavorites.all()) {
+            if(!query.isEmpty() && !fav.name.toLowerCase(Locale.ROOT).contains(query))continue;
+            boolean present=false;
+            for(Entry e:found) if(HeadFavorites.id(e.head().displayName(),e.head().fingerprint()).equals(fav.id)) {present=true;break;}
+            if(!present)found.add(new Entry(new HeadFrameScanner.Head(BlockPos.ZERO,fav.name,fav.fingerprint,false),null,
+                "No currently listed head (wishlist)",true));
+        }
         entries=found;
         updatePage();
     }
@@ -136,6 +203,8 @@ public final class HeadShopScreen extends Screen {
             rows[i]=page*ROWS+i<entries.size()?entries.get(page*ROWS+i):null;
             if(details[i]!=null) {details[i].visible=rows[i]!=null;details[i].active=rows[i]!=null;}
             if(go[i]!=null) {go[i].visible=rows[i]!=null;go[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null;}
+            if(townButtons[i]!=null) {townButtons[i].visible=rows[i]!=null;townButtons[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null && validName(rows[i].payment().town());}
+            if(nationButtons[i]!=null) {nationButtons[i].visible=rows[i]!=null;nationButtons[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null && validName(rows[i].payment().nation());}
             if(highlight[i]!=null) {highlight[i].visible=rows[i]!=null;highlight[i].active=rows[i]!=null && !rows[i].unavailable();}
             if(favoriteButtons[i]!=null) {
                 favoriteButtons[i].visible=rows[i]!=null;
@@ -148,7 +217,7 @@ public final class HeadShopScreen extends Screen {
     private void toggleFavorite(int row) {
         Entry e=rows[row]; if(e==null)return;
         HeadFavorites.toggle(e.head().displayName(),e.head().fingerprint());
-        refresh();
+        filterEntries();
     }
     private static int distance2(EarthMarketClient.DisplayQuote q, BlockPos p) {
         int x=q.x()-p.getX(), y=q.y()-p.getY(), z=q.z()-p.getZ();
@@ -161,7 +230,7 @@ public final class HeadShopScreen extends Screen {
         minecraft.player.sendSystemMessage(Component.literal("[EM Market] Head: " + e.head().displayName()
             + " | style="+e.head().nameSource()+" color=#"+Integer.toHexString(e.head().nameColor())
             + " | frame="+p.getX()+","+p.getY()+","+p.getZ()
-            + " | " + e.status()
+            + " | " + e.status() + " | payment mapping is proximity-only and NOT a verified head sale"
             + (e.payment()==null?"":(" | possible payment " + e.payment().bundlePrice()+"G / "
                 + e.payment().amount()+"x " +e.payment().item()+" at "
                 +e.payment().x()+","+e.payment().y()+","+e.payment().z()))));
@@ -183,14 +252,33 @@ public final class HeadShopScreen extends Screen {
             minecraft.player.sendSystemMessage(Component.literal("[EM Market] Head tracer active; move toward the frame."));
         }
     }
+    private static boolean validName(String name) {
+        return name!=null && !name.isBlank() && !"unknown".equalsIgnoreCase(name)
+            && name.codePoints().noneMatch(c->Character.isWhitespace(c) || Character.isISOControl(c));
+    }
+    /** T/N never guess a capital. Still arm the exact head frame as arrival target. */
+    private void travelExplicit(int row, boolean nation) {
+        Entry e=rows[row];
+        if(e==null || e.unavailable() || e.payment()==null)return;
+        String destination=nation?e.payment().nation():e.payment().town();
+        if(!validName(destination))return;
+        String dimension=storedDimension(e);
+        if(dimension==null)return;
+        String command=(nation?"/n spawn ":"/t spawn ")+destination;
+        minecraft.gui.setScreen(null);
+        PendingShopTravel.armHead(e.head().position(),dimension,e.head().displayName(),command);
+        minecraft.gui.setScreen(new ChatScreen(command,false));
+    }
+    private String storedDimension(Entry e) {
+        for(HeadCatalogue.SavedHead saved:HeadCatalogue.all()) {
+            if(saved.pos().equals(e.head().position()) && Objects.equals(saved.fingerprint,e.head().fingerprint()))
+                return saved.dimension;
+        }
+        return null;
+    }
     private void travel(int row) {
         Entry e=rows[row]; if(e==null || e.payment()==null) return;
-        String dim = null;
-        for (HeadCatalogue.SavedHead saved : HeadCatalogue.all()) {
-            if(saved.pos().equals(e.head().position()) && java.util.Objects.equals(saved.fingerprint,e.head().fingerprint())) {
-                dim=saved.dimension; break;
-            }
-        }
+        String dim=storedDimension(e);
         if(dim==null) {info(row);return;}
         // Close our screen first; the capital API callback will open the chat draft.
         minecraft.gui.setScreen(null);
@@ -219,13 +307,13 @@ public final class HeadShopScreen extends Screen {
             g.text(font,shorten(e.head().displayName(),32),x+9,yy,e.head().nameColor(),e.head().nameBold());
             g.text(font,e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ(),x+9,yy+12,0xFFB8C8D2,false);
             var q=e.payment();
-            g.text(font,q==null?"No trusted price":String.format(Locale.ROOT,"%.2fG / %dx (%s)",q.bundlePrice(),q.amount(),shorten(q.item(),12)),
+            g.text(font,q==null?"Price not linked":String.format(Locale.ROOT,"%.2fG / %dx (%s)",q.bundlePrice(),q.amount(),shorten(q.item(),12)),
                 x+265,yy,0xFFFFD17D,false);
             g.text(font,shorten(e.status(),37),x+265,yy+12,0xFFB8C8D2,false);
         }
         g.text(font,"Loaded frames: "+entries.size()+" | page "+(page+1)+"/"+Math.max(1,(entries.size()+ROWS-1)/ROWS),
             x+9,y+HEIGHT-47,0xFFE2E6EB,false);
-        g.text(font,"★: wishlist | i: info | H: 18s outline | Go: possible payment",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
+        g.text(font,"★: wishlist | H: highlight | T/N: manual spawn | Go: automatic",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
     }
     @Override public void onClose() {minecraft.gui.setScreen(previous);}
 }
