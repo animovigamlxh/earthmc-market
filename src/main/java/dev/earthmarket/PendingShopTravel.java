@@ -10,6 +10,8 @@ public final class PendingShopTravel {
     private static final long MAX_WAIT_MS = 180_000L;
     private static final double ARRIVAL_RADIUS_SQUARED = 48.0 * 48.0;
     private static EarthMarketClient.DisplayQuote pending;
+    private static BlockPos headFrame;
+    private static String headDimension;
     private static String pendingCommand;
     private static boolean awaitingSubmit;
     private static long armedAt, sentAt;
@@ -32,6 +34,23 @@ public final class PendingShopTravel {
         pendingCommand = normalize(command);
         armedAt = System.currentTimeMillis();
         awaitingSubmit = true;
+    }
+
+    /** Track the exact item frame rather than the nearby placeholder payment shop. */
+    public static void armHead(BlockPos frame, String dimension, String label, String command) {
+        clear();
+        headFrame = frame.immutable();
+        headDimension = dimension;
+        pending = headQuote(frame, dimension, label);
+        pendingCommand = normalize(command);
+        armedAt = System.currentTimeMillis();
+        awaitingSubmit = true;
+    }
+
+    public static EarthMarketClient.DisplayQuote headQuote(BlockPos pos, String dimension, String name) {
+        return new EarthMarketClient.DisplayQuote("head-frame-nav", name, "sell", "head frame", 0, 0, 1,
+            null, null, "unknown", null, null, "", "sign-block", "earthmc-sign", "", "", "",
+            pos.getX(), pos.getY(), pos.getZ(), dimension);
     }
 
     private static String normalize(String command) {
@@ -87,9 +106,10 @@ public final class PendingShopTravel {
         BlockPos pos = new BlockPos(q.x(), q.y(), q.z());
         if (!mc.level.hasChunkAt(pos)) return;
         if (mc.player.distanceToSqr(pos.getX() + .5, pos.getY() + .5, pos.getZ() + .5) > ARRIVAL_RADIUS_SQUARED) return;
-        String result = ShopLocator.start(q);
+        String result = headFrame != null ? ShopLocator.startHead(headFrame, headDimension) : ShopLocator.start(q);
         if (result.startsWith("Highlighting") || result.startsWith("Multiple/no")) {
             notify(mc, "Target shop nearby: " + result);
+            NavigationGuide.clear();
             clear();
         } else if (result.contains("No exact")) {
             notify(mc, result);
@@ -104,7 +124,7 @@ public final class PendingShopTravel {
     public static void cancel() { clear(); }
 
     private static void clear() {
-        pending = null; pendingCommand = null; awaitingSubmit = false;
+        pending = null; headFrame = null; headDimension = null; pendingCommand = null; awaitingSubmit = false;
         armedAt = 0; sentAt = 0; originDimension = null; sawTravel = false;
         sawWorldUnload = false; guideStarted = false; tickCounter = 0;
     }

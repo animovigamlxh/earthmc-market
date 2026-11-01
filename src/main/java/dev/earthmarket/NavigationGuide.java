@@ -45,7 +45,8 @@ public final class NavigationGuide {
         double dy = mc.player.getY() - (sign.getY() + .5);
         double dz = mc.player.getZ() - (sign.getZ() + .5);
         if (dx * dx + dy * dy + dz * dz <= 48.0 * 48.0) {
-            String result = ShopLocator.start(target);
+            String result = "head-frame-nav".equals(target.id())
+                ? ShopLocator.startHead(sign, target.dimension()) : ShopLocator.start(target);
             if (result.startsWith("Highlighting") || result.startsWith("Multiple/no")) {
                 mc.player.sendSystemMessage(Component.literal("[EM Market] " + result));
                 clear();

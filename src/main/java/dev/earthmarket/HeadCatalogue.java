@@ -85,7 +85,9 @@ public final class HeadCatalogue {
             String key=key(dimension,head.position());
             observed.add(key);
             SavedHead old=saved.get(key);
-            if(old==null || !head.displayName().equals(old.name) || !head.fingerprint().equals(old.fingerprint)) {
+            if(old==null || !head.displayName().equals(old.name) || !head.fingerprint().equals(old.fingerprint)
+                || head.nameColor()!=old.nameColor || head.nameBold()!=old.nameBold
+                || !java.util.Objects.equals(head.nameSource(),old.nameSource)) {
                 saved.put(key,new SavedHead(dimension,head)); changed=true;
             } else old.lastSeen=System.currentTimeMillis();
             missing.remove(key);

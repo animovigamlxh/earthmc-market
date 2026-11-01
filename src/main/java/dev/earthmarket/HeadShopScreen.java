@@ -175,15 +175,28 @@ public final class HeadShopScreen extends Screen {
                 dim=saved.dimension; break;
             }
         }
+        minecraft.gui.setScreen(null);
         String message=ShopLocator.startHead(e.head().position(),dim);
         minecraft.player.sendSystemMessage(Component.literal("[EM Market] "+message));
-        if(message.startsWith("Highlighting")) minecraft.gui.setScreen(null);
+        if(!message.startsWith("Highlighting")) {
+            NavigationGuide.setTarget(PendingShopTravel.headQuote(e.head().position(),dim,e.head().displayName()));
+            minecraft.player.sendSystemMessage(Component.literal("[EM Market] Head tracer active; move toward the frame."));
+        }
     }
     private void travel(int row) {
         Entry e=rows[row]; if(e==null || e.payment()==null) return;
-        info(row);
-        // This is a navigation lead only: price cannot be treated as a verified head quote.
-        CapitalTravelResolver.prepare(minecraft,e.payment().town(),e.payment().nation(),e.payment());
+        String dim = null;
+        for (HeadCatalogue.SavedHead saved : HeadCatalogue.all()) {
+            if(saved.pos().equals(e.head().position()) && java.util.Objects.equals(saved.fingerprint,e.head().fingerprint())) {
+                dim=saved.dimension; break;
+            }
+        }
+        if(dim==null) {info(row);return;}
+        // Close our screen first; the capital API callback will open the chat draft.
+        minecraft.gui.setScreen(null);
+        // The payment sign is only a travel clue, never the highlighted target.
+        CapitalTravelResolver.prepare(minecraft,e.payment().town(),e.payment().nation(),e.payment(),
+            e.head().position(),dim,e.head().displayName());
     }
     private static String shorten(String value,int limit) {
         if(value==null)return "";

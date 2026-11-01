@@ -31,12 +31,17 @@ public final class CapitalTravelResolver {
         prepare(mc, town, nation, null);
     }
     public static void prepare(Minecraft mc, String town, String nation, EarthMarketClient.DisplayQuote shop) {
-        if (shop != null) notify(mc, "Travel target: " + ShopLocator.coordinates(shop));
+        prepare(mc, town, nation, shop, null, null, null);
+    }
+    public static void prepare(Minecraft mc, String town, String nation, EarthMarketClient.DisplayQuote shop,
+                               net.minecraft.core.BlockPos frame, String frameDimension, String frameName) {
+        if (frame != null) notify(mc, "Head target: " + frame.toShortString() + " | " + frameDimension);
+        else if (shop != null) notify(mc, "Travel target: " + ShopLocator.coordinates(shop));
         if (!valid(town)) { notify(mc, "Shop town is unknown; cannot choose a teleport command."); return; }
         String key = town.toLowerCase(Locale.ROOT);
         Cached cached = CACHE.get(key);
         if (cached != null && cached.until > System.currentTimeMillis()) {
-            openDraft(mc, town, nation, cached.capital, shop); return;
+            openDraft(mc, town, nation, cached.capital, shop, frame, frameDimension, frameName); return;
         }
         notify(mc, "Checking whether " + town + " is a nation capital...");
         PENDING.computeIfAbsent(key, k -> {
@@ -70,17 +75,20 @@ public final class CapitalTravelResolver {
             if (error != null) {
                 notify(mc, "Cannot verify capital status (network/API). Use T/N manually; no destination was guessed.");
             } else {
-                openDraft(mc, town, nation, capital, shop);
+                openDraft(mc, town, nation, capital, shop, frame, frameDimension, frameName);
             }
         }));
     }
-    private static void openDraft(Minecraft mc, String town, String nation, boolean capital, EarthMarketClient.DisplayQuote shop) {
+    private static void openDraft(Minecraft mc, String town, String nation, boolean capital, EarthMarketClient.DisplayQuote shop,
+                                  net.minecraft.core.BlockPos frame, String frameDimension, String frameName) {
         if (capital && !valid(nation)) {
             notify(mc, "This is a capital but its nation is unknown; cannot prepare /n spawn.");
             return;
         }
         String command = capital ? "/n spawn " + nation : "/t spawn " + town;
-        if (shop != null) {
+        if (frame != null && frameDimension != null) {
+            PendingShopTravel.armHead(frame, frameDimension, frameName, command);
+        } else if (shop != null) {
             PendingShopTravel.arm(shop, command);
         }
         mc.gui.setScreen(new ChatScreen(command, false));
