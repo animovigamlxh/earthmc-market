@@ -281,3 +281,8 @@ GUI Go / Go Buy / Go Sell and H now print the saved sign coordinates in local ch
 - Going to a shop is navigation only: it does not mark any transaction or consume stock.
 - Left-click inspection enriches a matching sign record with item identity but **does not override** sign-observed price, lots, available items or tradeable status. Re-scan nearby signs to refresh live prices and lots.
 - Known item variants are still deliberately kept separate from unknown variants; clicking a sign can reveal previously unknown metadata, which may move a listing between variant-specific comparison groups.
+
+
+### v0.5.29: Head shops (experimental)
+
+Open `/emprice gui` and select **Heads**, or use `/emprice heads`. The screen lists nearby *loaded* player-head item frames with names and positions. Nearby QuickShop signs are shown only as **unverified payment candidates**, because on EarthMC redstone head shops can sell an unrelated trigger item (such as a map). **Go** navigates to the candidate sign, **Info** prints head coordinates and possible payment details. This mode does not modify or pollute the normal item/price or arbitrage database. Use `/emprice scan` before opening Heads to refresh possible signs. These redstone shops may require manual confirmation of sign-to-frame correspondence.

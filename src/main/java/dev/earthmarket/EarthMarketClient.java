@@ -37,6 +37,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final List<Quote> QUOTES = new ArrayList<>();
     private static final NearbySignScanner SIGNS = new NearbySignScanner(EarthMarketClient::foundSign);
     
+    private static boolean scanWasActive = false;
     private static long lastSignSaveAt = 0;
     private static boolean signDirty = false;
     private static final Deque<Quote> SIGN_LOCATION_QUEUE = new ArrayDeque<>();
@@ -55,6 +56,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     // Commands are submitted from ChatScreen; delay opening until it has closed.
     private static boolean openArbitrageGui = false;
     private static int openGuiInTicks = -1;
+    private static int openHeadsGuiInTicks = -1;
     // Intentionally strict: no quote is created when type, price or quantity is ambiguous.
     private static final Pattern SHOP_LINE = Pattern.compile("(?i)(?:quickshop|shop)\\s*[:|]\\s*([a-z0-9_:.-]+)\\s+(BUY|SELL)\\s+(\\d+)\\s*(?:items?\\s*)?(?:for|@)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:g|gold)\\b");
 
@@ -117,6 +119,7 @@ public final class EarthMarketClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (!isEarthMc(client)) {
                 SIGNS.pause();
+                scanWasActive = false;
                 PendingShopTravel.cancel();
                 ShopLocator.clear();
                 SIGN_LOCATION_QUEUE.clear();
@@ -124,9 +127,14 @@ public final class EarthMarketClient implements ClientModInitializer {
                 enchantCaptureShop = null;
                 lastInspectedShop = null;
                 openGuiInTicks = -1;
+                openHeadsGuiInTicks = -1;
                 return;
             }
             SIGNS.tick(client);
+            // After sign quotes have been collected, associate nearby displayed heads
+            // only when there is exactly one possible head-shop sign and one frame.
+            if (scanWasActive && !SIGNS.active()) refreshHeadFrames(client, false);
+            scanWasActive = SIGNS.active();
             ShopLocator.tick(client);
             NavigationGuide.tick(client);
             PendingShopTravel.tick(client);
@@ -140,6 +148,10 @@ public final class EarthMarketClient implements ClientModInitializer {
             }
             if (signDirty && System.currentTimeMillis() - lastSignSaveAt > 5000L) {
                 signDirty = false; lastSignSaveAt = System.currentTimeMillis(); save();
+            }
+            if (openHeadsGuiInTicks >= 0 && openHeadsGuiInTicks-- == 0) {
+                openHeadsGuiInTicks = -1;
+                if (client.player != null) client.gui.setScreen(new HeadShopScreen(new MarketScreen()));
             }
             if (openGuiInTicks < 0) return;
             if (openGuiInTicks-- > 0) return;
@@ -181,6 +193,10 @@ public final class EarthMarketClient implements ClientModInitializer {
                     say(SIGNS.startManual(Minecraft.getInstance()) ? "Scanning nearby loaded signs (32 blocks horizontal, +/-12 vertical)..." : "Join an EarthMC world first.");
                     return 1;
                 }))
+                .then(literal("heads").executes(ctx -> {openHeadsGuiInTicks = 2; return 1;}))
+                .then(literal("headscan").executes(ctx -> {
+                    refreshHeadFrames(Minecraft.getInstance(), true); return 1;
+                }))
                 .then(literal("autoscan")
                     .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s or after moving to a new area)."); return 1; }))
                     .then(literal("off").executes(ctx -> { SIGNS.setAuto(false); say("Auto sign scan OFF."); return 1; })))
@@ -200,7 +216,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("restoredeleted").executes(ctx -> { say("Restored " + restoreDeletedSigns() + " ignored sign locations; rescan nearby to rediscover them."); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | heads | headscan | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay || emittingLocalMessage || !isEarthMc(Minecraft.getInstance())) return;
@@ -388,6 +404,51 @@ public final class EarthMarketClient implements ClientModInitializer {
         if (candidate.enchantments == null || candidate.enchantments.isBlank())
             candidate.enchantments = inspected.enchantments;
         return candidate;
+    }
+
+    /** Combine nearby frame information with previously scanned head-shop signs.
+     *  Ambiguous storefronts are deliberately left unchanged rather than mispriced. */
+    private static void refreshHeadFrames(Minecraft mc, boolean report) {
+        if (!isEarthMc(mc)) return;
+        List<HeadFrameScanner.Head> frames = HeadFrameScanner.nearby(mc);
+        int matched = 0, ambiguous = 0, named = 0;
+        String dimension = mc.level.dimension().toString();
+        for (HeadFrameScanner.Head head : frames) {
+            if (head.specific()) named++;
+            List<Quote> nearby = new ArrayList<>();
+            for (Quote q : QUOTES) {
+                if (!"earthmc-sign".equals(q.source) || !Objects.equals(q.dimension, dimension)) continue;
+                if (!isHeadShop(q.item)) continue;
+                int dx=q.x-head.position().getX(), dy=q.y-head.position().getY(), dz=q.z-head.position().getZ();
+                if (dx*dx + dy*dy + dz*dz <= 16) nearby.add(q);
+            }
+            if (nearby.size() != 1) { if (nearby.size() > 1) ambiguous++; continue; }
+            Quote q=nearby.get(0);
+            // Do not attach a frame if two head frames compete for the same shop sign.
+            int competing=0;
+            for (HeadFrameScanner.Head other : frames) {
+                int dx=q.x-other.position().getX(), dy=q.y-other.position().getY(), dz=q.z-other.position().getZ();
+                if (dx*dx+dy*dy+dz*dz<=16) competing++;
+            }
+            if (competing != 1) { ambiguous++; continue; }
+            if (!head.specific()) continue;
+            String identity = head.fingerprint();
+            if (!identity.equals(q.variantKey) || !head.displayName().equals(q.variantDescription)) {
+                q.variantKey = identity;
+                q.variantDescription = head.displayName();
+                q.updated = Instant.now().toString();
+                signDirty = true;
+            }
+            matched++;
+        }
+        if (report) say("Head frames: " + frames.size() + ", named/profiled: " + named
+            + ", linked to shops: " + matched + ", ambiguous: " + ambiguous
+            + ". Only loaded frames are visible; unmatched frames have no verified shop price.");
+    }
+    private static boolean isHeadShop(String name) {
+        if (name == null) return false;
+        String n = name.toLowerCase(Locale.ROOT);
+        return n.contains("头颅") || n.contains("玩家头") || n.contains("player head") || n.contains("player_head") || n.contains("skull");
     }
 
     private static void foundSign(BlockPos pos, NearbySignScanner.Found found) {

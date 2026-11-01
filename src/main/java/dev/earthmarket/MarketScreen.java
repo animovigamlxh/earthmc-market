@@ -75,8 +75,10 @@ public final class MarketScreen extends Screen {
             .bounds(left + 6, top + 297, 80, 20).build());
         next = addRenderableWidget(Button.builder(Component.literal("Next >"), b -> { page++; refresh(); })
             .bounds(left + 467, top + 297, 80, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
+        addRenderableWidget(Button.builder(Component.literal("Heads"), b -> {remember(); this.minecraft.gui.setScreen(new HeadShopScreen(new MarketScreen()));})
             .bounds(left + 240, top + 297, 75, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("X"), b -> this.onClose())
+            .bounds(left + 432, top + 297, 29, 20).build());
         for (int i = 0; i < PAGE_SIZE; i++) {
             final int row = i;
             int y = top + 70 + i * 25;
