@@ -197,6 +197,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                     return 1;
                 }))
                 .then(literal("heads").executes(ctx -> {openHeadsGuiInTicks = 2; return 1;}))
+                .then(literal("favhead").executes(ctx -> { QuickHeadFavorite.toggleAimed(Minecraft.getInstance()); return 1; }))
                 .then(literal("headscan").executes(ctx -> {
                     refreshHeadFrames(Minecraft.getInstance(), true); return 1;
                 }))
@@ -219,7 +220,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("restoredeleted").executes(ctx -> { say("Restored " + restoreDeletedSigns() + " ignored sign locations; rescan nearby to rediscover them."); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | heads | headscan | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | heads | headscan | favhead | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay || emittingLocalMessage || !isEarthMc(Minecraft.getInstance())) return;

@@ -286,3 +286,10 @@ GUI Go / Go Buy / Go Sell and H now print the saved sign coordinates in local ch
 ### v0.5.29: Head shops (experimental)
 
 Open `/emprice gui` and select **Heads**, or use `/emprice heads`. The screen lists nearby *loaded* player-head item frames with names and positions. Nearby QuickShop signs are shown only as **unverified payment candidates**, because on EarthMC redstone head shops can sell an unrelated trigger item (such as a map). **Go** navigates to the candidate sign, **Info** prints head coordinates and possible payment details. This mode does not modify or pollute the normal item/price or arbitrage database. Use `/emprice scan` before opening Heads to refresh possible signs. These redstone shops may require manual confirmation of sign-to-frame correspondence.
+
+
+## v0.5.34 Quick head wishlist
+- Aim at an existing player-head item frame within six blocks, then enter `/emprice favhead` to toggle its product favorite.
+- No name search or coordinate matching needed; frames with ambiguous identity are rejected to avoid favoriting the wrong same-name head.
+- Uses the same persistent `head-favorites.json` file as the Heads GUI.
+- A keyboard/macro binding may be assigned to the command in a client that supports chat-command shortcuts.
