@@ -4,9 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.decoration.ItemFrame;
-import net.minecraft.world.item.Items;
 
 import java.io.Reader;
 import java.io.Writer;
@@ -42,6 +39,9 @@ public final class HeadCatalogue {
     private static final Map<String,SavedHead> saved = new HashMap<>();
     private static final Map<String,Integer> missing = new HashMap<>();
     private static int tickCounter;
+    private static boolean dirty;
+    private static long lastWriteAt;
+    private static final long SAVE_DEBOUNCE_MS = 8_000L;
     private HeadCatalogue() {}
     private static String key(String dim, BlockPos p) { return dim+":"+p.getX()+":"+p.getY()+":"+p.getZ(); }
     public static void load() {
@@ -65,8 +65,12 @@ public final class HeadCatalogue {
     }
     public static List<SavedHead> all() { return new ArrayList<>(saved.values()); }
     public static void tick(Minecraft mc) {
-        if (++tickCounter % 40 != 0 || mc==null || mc.player==null || mc.level==null || !EarthMarketClient.isEarthMc(mc)) return;
-        scan(mc);
+        if (mc==null || mc.player==null || mc.level==null || !EarthMarketClient.isEarthMc(mc)) return;
+        // Five seconds per scan, not two. This is a separate scanner from QuickShop signs.
+        if (++tickCounter % 100 == 0) scan(mc);
+        if (dirty && System.currentTimeMillis() - lastWriteAt >= SAVE_DEBOUNCE_MS) {
+            write(); dirty = false; lastWriteAt = System.currentTimeMillis();
+        }
     }
     public static void scan(Minecraft mc) {
         if(mc==null || mc.level==null || mc.player==null || !EarthMarketClient.isEarthMc(mc)) return;
@@ -90,16 +94,11 @@ public final class HeadCatalogue {
             if(mc.player.distanceToSqr(p.getX()+.5,p.getY()+.5,p.getZ()+.5)>20*20 || !mc.level.hasChunkAt(p)) { missing.remove(key(dimension,p)); continue; }
             String key=key(dimension,p);
             if(observed.contains(key)) continue;
-            // A frame at the recorded location with no head counts as missing.
-            boolean present=false;
-            for(Entity entity:mc.level.entitiesForRendering()) {
-                if(entity instanceof ItemFrame frame && frame.blockPosition().equals(p)
-                    && !frame.getItem().isEmpty() && frame.getItem().is(Items.PLAYER_HEAD)) {present=true;break;}
-            }
-            if(present){missing.remove(key);continue;}
+            // The one-pass frame scan already populated observed. Avoid re-enumerating
+            // ALL rendering entities once for every saved head (quadratic in busy shops).
             int count=missing.merge(key,1,Integer::sum);
             if(count>=3){ saved.remove(key); missing.remove(key); changed=true; }
         }
-        if(changed) write();
+        if(changed) dirty = true;
     }
 }
