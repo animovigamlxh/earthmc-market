@@ -62,6 +62,6 @@ public final class QuickHeadFavorite {
 
     private static void message(Minecraft mc,String msg) {
         // Not fed through the QuickShop chat parser (avoids chat-listener recursion).
-        mc.player.displayClientMessage(Component.literal("[EM Market] "+msg),true);
+        mc.player.sendSystemMessage(Component.literal("[EM Market] "+msg));
     }
 }
