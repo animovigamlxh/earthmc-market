@@ -51,9 +51,9 @@ public final class HeadShopScreen extends Screen {
         addRenderableWidget(search);
         favoritesFilter = addRenderableWidget(Button.builder(Component.literal(""), b -> {onlyFavorites=!onlyFavorites;page=0;refresh();})
             .bounds(x+323,y+41,145,19).build());
-        backPage = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; refresh();})
+        backPage = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; updatePage();})
             .bounds(x+7,y+HEIGHT-27,75,20).build());
-        nextPage = addRenderableWidget(Button.builder(Component.literal("Next >"), b -> {page++; refresh();})
+        nextPage = addRenderableWidget(Button.builder(Component.literal("Next >"), b -> {page++; updatePage();})
             .bounds(x+WIDTH-83,y+HEIGHT-27,75,20).build());
         addRenderableWidget(Button.builder(Component.literal("Refresh frames"), b -> {HeadCatalogue.scan(minecraft); refresh();})
             .bounds(x+102,y+HEIGHT-27,130,20).build());
@@ -77,7 +77,6 @@ public final class HeadShopScreen extends Screen {
     private void refresh() {
         Minecraft mc=Minecraft.getInstance();
         if (!EarthMarketClient.isEarthMc(mc)) {entries=List.of(); return;}
-        HeadCatalogue.scan(mc);
         List<HeadCatalogue.SavedHead> frames=HeadCatalogue.all();
         String query=search==null?previousQuery:search.getValue();
         query=query.strip().toLowerCase(Locale.ROOT);
@@ -123,6 +122,11 @@ public final class HeadShopScreen extends Screen {
         }
         found.sort(Comparator.comparing(e -> e.head().displayName().toLowerCase(Locale.ROOT)));
         entries=found;
+        updatePage();
+    }
+
+    /** Page changes touch only the already prepared rows; no world scan or quote matching. */
+    private void updatePage() {
         if(favoritesFilter!=null) favoritesFilter.setMessage(Component.literal(onlyFavorites?"★ Favorites only":"☆ Show favorites"));
         int totalPages=Math.max(1,(entries.size()+ROWS-1)/ROWS);
         page=Math.max(0,Math.min(page,totalPages-1));

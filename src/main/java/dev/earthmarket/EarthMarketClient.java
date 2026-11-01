@@ -38,6 +38,16 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static final NearbySignScanner SIGNS = new NearbySignScanner(EarthMarketClient::foundSign);
     
     private static boolean scanWasActive = false;
+    // Rebuilt once at scan start: O(1) lookup instead of scanning all saved quotes for every sign.
+    private static final Map<String, Quote> SCANNED_SIGN_INDEX = new HashMap<>();
+    private static String indexedSign(String dim, int x, int y, int z, String side) {
+        return String.valueOf(dim) + "|" + x + "|" + y + "|" + z + "|" + side;
+    }
+    private static void rebuildSignIndex() {
+        SCANNED_SIGN_INDEX.clear();
+        for (Quote q : QUOTES) if ("earthmc-sign".equals(q.source))
+            SCANNED_SIGN_INDEX.put(indexedSign(q.dimension, q.x, q.y, q.z, q.signSide), q);
+    }
     private static long lastSignSaveAt = 0;
     private static boolean signDirty = false;
     private static final Deque<Quote> SIGN_LOCATION_QUEUE = new ArrayDeque<>();
@@ -122,6 +132,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (!isEarthMc(client)) {
                 SIGNS.pause();
                 scanWasActive = false;
+                SCANNED_SIGN_INDEX.clear();
                 PendingShopTravel.cancel();
                 ShopLocator.clear();
                 SIGN_LOCATION_QUEUE.clear();
@@ -136,7 +147,9 @@ public final class EarthMarketClient implements ClientModInitializer {
             HeadCatalogue.tick(client);
             // After sign quotes have been collected, associate nearby displayed heads
             // only when there is exactly one possible head-shop sign and one frame.
-            if (scanWasActive && !SIGNS.active()) refreshHeadFrames(client, false);
+            // HeadCatalogue already scans every 5 seconds; avoid triggering a second
+            // full entity scan every time the 30-second sign scan completes.
+            if (!scanWasActive && SIGNS.active()) rebuildSignIndex();
             scanWasActive = SIGNS.active();
             ShopLocator.tick(client);
             NavigationGuide.tick(client);
@@ -463,15 +476,8 @@ public final class EarthMarketClient implements ClientModInitializer {
         String item = normalized(p.item());
         var level = Minecraft.getInstance().level;
         String dimension = level == null ? null : level.dimension().toString();
-        Quote matched = null;
-        for (Quote old : QUOTES) {
-            if (!"earthmc-sign".equals(old.source)
-                || old.x != pos.getX() || old.y != pos.getY() || old.z != pos.getZ()
-                || !Objects.equals(old.signSide, found.side())
-                || !Objects.equals(old.dimension, dimension)) continue;
-            matched = old;
-            break;
-        }
+        String signIdentity = indexedSign(dimension, pos.getX(), pos.getY(), pos.getZ(), found.side());
+        Quote matched = SCANNED_SIGN_INDEX.get(signIdentity);
         // On EarthMC, the numeric value on the trading/status line is the displayed
         // remaining stock (sell) or buying capacity (buy). This is distinct
         // from the fourth line trade bundle size.
@@ -542,7 +548,7 @@ public final class EarthMarketClient implements ClientModInitializer {
             }
             QUOTES.remove(prior);
         }
-        upsert(q); signDirty = true;
+        upsert(q); SCANNED_SIGN_INDEX.put(signIdentity, q); signDirty = true;
         if (!"confirmed".equals(q.locationStatus) && !"wilderness".equals(q.locationStatus)) {
             SIGN_LOCATION_QUEUE.addLast(q);
         }
