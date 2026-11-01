@@ -112,6 +112,8 @@ public final class EarthMarketClient implements ClientModInitializer {
         load();
         loadIgnoredSigns();
         loadSettings();
+        HeadCatalogue.load();
+        HeadFavorites.load();
         SIGNS.setShowAutomaticMessages(showAutoScanMessages);
         ShopEspRenderer.register();
         NavigationGuide.register();
@@ -131,6 +133,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 return;
             }
             SIGNS.tick(client);
+            HeadCatalogue.tick(client);
             // After sign quotes have been collected, associate nearby displayed heads
             // only when there is exactly one possible head-shop sign and one frame.
             if (scanWasActive && !SIGNS.active()) refreshHeadFrames(client, false);

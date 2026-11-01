@@ -52,6 +52,17 @@ public final class ShopLocator {
             : "Highlighting container at " + found.toShortString() + " for 18 seconds.";
     }
 
+    /** Highlights the recorded item-frame position, without guessing a nearby chest. */
+    public static String startHead(BlockPos frame, String frameDimension) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) return "Join a world first.";
+        if (!mc.level.dimension().toString().equals(frameDimension)) return "Head frame is in another dimension.";
+        if (!mc.level.hasChunkAt(frame) || mc.player.distanceToSqr(frame.getX()+.5,frame.getY()+.5,frame.getZ()+.5)>48*48)
+            return "Frame is too far to outline. Head frame coordinates: " + frame.toShortString();
+        target=frame.immutable(); dimension=frameDimension; ticksLeft=18*20; age=0; markerIsSign=false;
+        return "Highlighting head ITEM FRAME at " + frame.toShortString() + " for 18 seconds.";
+    }
+
     /** Always report the saved location; it is a sign/block position, not necessarily a chest. */
     public static String coordinates(EarthMarketClient.DisplayQuote quote) {
         if (quote == null) return "No shop selected.";
