@@ -155,6 +155,7 @@ public final class HeadShopScreen extends Screen {
         BlockPos p=e.head().position();
         if(e.unavailable()) {minecraft.player.sendSystemMessage(Component.literal("[EM Market] Wishlisted head: "+e.head().displayName()+" (not currently listed)"));return;}
         minecraft.player.sendSystemMessage(Component.literal("[EM Market] Head: " + e.head().displayName()
+            + " | style="+e.head().nameSource()+" color=#"+Integer.toHexString(e.head().nameColor())
             + " | frame="+p.getX()+","+p.getY()+","+p.getZ()
             + " | " + e.status()
             + (e.payment()==null?"":(" | possible payment " + e.payment().bundlePrice()+"G / "
@@ -198,7 +199,7 @@ public final class HeadShopScreen extends Screen {
             int yy=y+85+i*30;
             g.fill(x+5,yy-3,x+WIDTH-5,yy+24,i%2==0?0x66334455:0x44243341);
             BlockPos p=e.head().position();
-            g.text(font,shorten(e.head().displayName(),32),x+9,yy,0xFF82E7B4,false);
+            g.text(font,shorten(e.head().displayName(),32),x+9,yy,e.head().nameColor(),e.head().nameBold());
             g.text(font,e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ(),x+9,yy+12,0xFFB8C8D2,false);
             var q=e.payment();
             g.text(font,q==null?"No trusted price":String.format(Locale.ROOT,"%.2fG / %dx (%s)",q.bundlePrice(),q.amount(),shorten(q.item(),12)),

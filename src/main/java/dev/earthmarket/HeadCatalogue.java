@@ -26,15 +26,19 @@ public final class HeadCatalogue {
         public int x,y,z;
         public String name, fingerprint;
         public boolean specific;
+        public int nameColor;
+        public boolean nameBold;
+        public String nameSource;
         public long lastSeen;
         public SavedHead() {}
         SavedHead(String dim, HeadFrameScanner.Head head) {
             dimension=dim; x=head.position().getX(); y=head.position().getY(); z=head.position().getZ();
             name=head.displayName(); fingerprint=head.fingerprint(); specific=head.specific();
+            nameColor=head.nameColor(); nameBold=head.nameBold(); nameSource=head.nameSource();
             lastSeen=System.currentTimeMillis();
         }
         public BlockPos pos() { return new BlockPos(x,y,z); }
-        public HeadFrameScanner.Head asHead() { return new HeadFrameScanner.Head(pos(),name,fingerprint,specific); }
+        public HeadFrameScanner.Head asHead() { return new HeadFrameScanner.Head(pos(),name,fingerprint,specific,nameColor==0?0xFF82E7B4:nameColor,nameBold,nameSource==null?"legacy":nameSource); }
     }
     private static final Map<String,SavedHead> saved = new HashMap<>();
     private static final Map<String,Integer> missing = new HashMap<>();
