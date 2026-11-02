@@ -230,13 +230,13 @@ public final class HeadShopScreen extends Screen {
             if(asking!=askOnly)continue;
             if(!query.isEmpty() && !e.head().displayName().toLowerCase(Locale.ROOT).contains(query)
                 && !e.head().fingerprint().toLowerCase(Locale.ROOT).contains(query))continue;
-            if(onlyFavorites && !HeadFavorites.contains(e.head().displayName(),e.head().fingerprint()))continue;
+            if(onlyFavorites && !HeadFavorites.contains(e.head().displayName(),favoriteFingerprint(e)))continue;
             found.add(e);
         }
         if(onlyFavorites && askOnly && includeHistory) for(HeadFavorites.Favorite fav:HeadFavorites.all()) {
             if(!query.isEmpty() && !fav.name.toLowerCase(Locale.ROOT).contains(query))continue;
             boolean present=false;
-            for(Entry e:found) if(HeadFavorites.id(e.head().displayName(),e.head().fingerprint()).equals(fav.id)) {present=true;break;}
+            for(Entry e:found) if(HeadFavorites.id(e.head().displayName(),favoriteFingerprint(e)).equals(fav.id)) {present=true;break;}
             if(!present)found.add(new Entry(new HeadFrameScanner.Head(fav.x==null || fav.y==null || fav.z==null?BlockPos.ZERO:new BlockPos(fav.x,fav.y,fav.z),fav.name,fav.fingerprint,false),null,
                 "No currently listed head (wishlist)",true));
         }
@@ -297,7 +297,7 @@ public final class HeadShopScreen extends Screen {
             if(favoriteButtons[i]!=null) {
                 favoriteButtons[i].visible=rows[i]!=null;
                 favoriteButtons[i].active=rows[i]!=null;
-                if(rows[i]!=null) favoriteButtons[i].setMessage(Component.literal(HeadFavorites.contains(rows[i].head().displayName(), rows[i].head().fingerprint())?"★":"☆"));
+                if(rows[i]!=null) favoriteButtons[i].setMessage(Component.literal(HeadFavorites.contains(rows[i].head().displayName(), favoriteFingerprint(rows[i]))?"★":"☆"));
             }
         }
     }
@@ -316,10 +316,14 @@ public final class HeadShopScreen extends Screen {
         HeadSaleStatus.set(dim,e.head().position(),e.head().fingerprint(),askOnly?"sale":"ask");
         filterEntries();
     }
+    private String favoriteFingerprint(Entry e) {
+        if(e==null)return "";
+        return HeadFavorites.identityFingerprint(e.head().fingerprint(),storedDimension(e),e.head().position());
+    }
     private void toggleFavorite(int row) {
         Entry e=rows[row]; if(e==null)return;
         HeadCatalogue.SavedHead stored=storedRecord(e);
-        HeadFavorites.toggle(e.head().displayName(),e.head().fingerprint(),
+        HeadFavorites.toggle(e.head().displayName(),favoriteFingerprint(e),
             stored==null?null:stored.dimension, stored==null?null:stored.pos(),
             locationTown(e),locationNation(e));
         filterEntries();
@@ -338,11 +342,11 @@ public final class HeadShopScreen extends Screen {
     private boolean knownNation(Entry e) {return validName(travelNation(e));}
     private String travelTown(Entry e) {
         HeadCatalogue.SavedHead h=storedRecord(e);
-        return h!=null && validName(h.town)?h.town:(e.payment()!=null && validName(e.payment().town())?e.payment().town():HeadFavorites.town(e.head().displayName(),e.head().fingerprint()));
+        return h!=null && validName(h.town)?h.town:(e.payment()!=null && validName(e.payment().town())?e.payment().town():HeadFavorites.town(e.head().displayName(),favoriteFingerprint(e)));
     }
     private String travelNation(Entry e) {
         HeadCatalogue.SavedHead h=storedRecord(e);
-        return h!=null && validName(h.nation)?h.nation:(e.payment()!=null && validName(e.payment().nation())?e.payment().nation():HeadFavorites.nation(e.head().displayName(),e.head().fingerprint()));
+        return h!=null && validName(h.nation)?h.nation:(e.payment()!=null && validName(e.payment().nation())?e.payment().nation():HeadFavorites.nation(e.head().displayName(),favoriteFingerprint(e)));
     }
     private static int distance2(EarthMarketClient.DisplayQuote q, BlockPos p) {
         int x=q.x()-p.getX(), y=q.y()-p.getY(), z=q.z()-p.getZ();

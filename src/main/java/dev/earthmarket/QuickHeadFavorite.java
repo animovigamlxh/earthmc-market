@@ -9,7 +9,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.AABB;
 
-/** Toggle the product wishlist by aiming at the actual frame, never by matching a name. */
+/** Toggle a wishlist entry for the actual aimed frame, with position fallback. */
 public final class QuickHeadFavorite {
     private QuickHeadFavorite() {}
 
@@ -31,12 +31,13 @@ public final class QuickHeadFavorite {
             message(mc,"The targeted item frame does not contain a detectable player head.");
             return;
         }
-        if (!selected.specific() || selected.fingerprint() == null || selected.fingerprint().isBlank()) {
-            message(mc,"Head has no unique identity data; not favoriting by ambiguous name.");
-            return;
-        }
-        boolean wasFavorite = HeadFavorites.contains(selected.displayName(),selected.fingerprint());
-        HeadFavorites.toggle(selected.displayName(),selected.fingerprint());
+        String dimension=mc.level.dimension().toString();
+        String identity=HeadFavorites.identityFingerprint(selected.fingerprint(),dimension,selected.position());
+        HeadCatalogue.SavedHead stored=HeadCatalogue.get(dimension,selected.position());
+        String town=stored==null?null:stored.town;
+        String nation=stored==null?null:stored.nation;
+        boolean wasFavorite = HeadFavorites.contains(selected.displayName(),identity);
+        HeadFavorites.toggle(selected.displayName(),identity,dimension,selected.position(),town,nation);
         message(mc,(wasFavorite?"Removed favorite: ":"Favorited: ")+selected.displayName()
             +" @ "+selected.position().toShortString());
     }

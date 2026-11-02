@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Locale;
 
-/** Persistent wishlist keyed by item identity, deliberately independent of item-frame coordinates. */
+/** Persistent wishlist keyed by item identity or, when absent, a dimension-scoped position. */
 public final class HeadFavorites {
     private static final Path FILE = Path.of("config", "earthmc-market", "head-favorites.json");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -34,6 +34,13 @@ public final class HeadFavorites {
     public static String id(String name, String fingerprint) {
         if(fingerprint != null && !fingerprint.isBlank()) return "fingerprint:" + fingerprint;
         return "name:" + (name == null ? "" : name.strip().toLowerCase(Locale.ROOT));
+    }
+    /** Location-scoped fallback for heads without a reliable profile/texture identity.
+     * Never use the display name alone to identify a physical head. */
+    public static String identityFingerprint(String fingerprint, String dimension, net.minecraft.core.BlockPos pos) {
+        if (fingerprint != null && !fingerprint.isBlank()) return fingerprint;
+        if (dimension == null || dimension.isBlank() || pos == null) return "";
+        return "location:" + dimension + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
     }
     public static boolean contains(String name, String fingerprint) {
         return favorites.containsKey(id(name,fingerprint));
