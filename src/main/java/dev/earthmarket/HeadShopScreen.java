@@ -23,7 +23,7 @@ import java.util.Objects;
 public final class HeadShopScreen extends Screen {
     private static final int ROWS = 6;
     private static final int WIDTH = 590;
-    private static final int HEIGHT = 292;
+    private static final int HEIGHT = 325;
     private final Screen previous;
     private final boolean askOnly;
     private final Button[] classifyButtons = new Button[ROWS];
@@ -41,6 +41,10 @@ public final class HeadShopScreen extends Screen {
     private final Button[] favoriteButtons = new Button[ROWS];
     private Button favoritesFilter;
     private Button historyFilter;
+    private Button nationFilterButton, townFilterButton, groupButton;
+    private static String selectedNation = "";
+    private static String selectedTown = "";
+    private static boolean groupByTown = false;
     private static boolean includeHistory = false;
     private final Map<String,HeadCatalogue.SavedHead> storedIndex = new HashMap<>();
     private final Map<Entry,HeadCatalogue.SavedHead> rowRecord = new java.util.IdentityHashMap<>();
@@ -77,17 +81,24 @@ public final class HeadShopScreen extends Screen {
             .bounds(x+343,y+HEIGHT-27,140,20).build());
         favoritesFilter = addRenderableWidget(Button.builder(Component.literal(""), b -> {onlyFavorites=!onlyFavorites;page=0;filterEntries();})
             .bounds(x+323,y+41,145,19).build());
+        nationFilterButton=addRenderableWidget(Button.builder(Component.literal("Nation: All"), b -> cycleNation())
+            .bounds(x+7,y+67,190,19).build());
+        townFilterButton=addRenderableWidget(Button.builder(Component.literal("Town: All"), b -> cycleTown())
+            .bounds(x+202,y+67,190,19).build());
+        groupButton=addRenderableWidget(Button.builder(Component.literal("Group: Off"), b -> {
+            groupByTown=!groupByTown;page=0;filterEntries();
+        }).bounds(x+397,y+67,184,19).build());
         backPage = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; updatePage();})
             .bounds(x+7,y+HEIGHT-27,75,20).build());
         nextPage = addRenderableWidget(Button.builder(Component.literal("Next >"), b -> {page++; updatePage();})
             .bounds(x+WIDTH-83,y+HEIGHT-27,75,20).build());
-        addRenderableWidget(Button.builder(Component.literal("Refresh frames"), b -> {HeadCatalogue.scan(minecraft); rebuildCatalogue();})
+        addRenderableWidget(Button.builder(Component.literal("Refresh frames"), b -> {HeadCatalogue.scan(minecraft); HeadCatalogue.resolveHistory(minecraft,12); rebuildCatalogue();})
             .bounds(x+102,y+HEIGHT-27,130,20).build());
         addRenderableWidget(Button.builder(Component.literal("Back"), b -> minecraft.gui.setScreen(previous))
             .bounds(x+250,y+HEIGHT-27,82,20).build());
         for (int i=0;i<ROWS;i++) {
             final int row=i;
-            int ry=y+83+i*30;
+            int ry=y+114+i*30;
             classifyButtons[i]=addRenderableWidget(Button.builder(Component.literal("Move"),b -> moveCategory(row))
                 .bounds(x+367,ry,38,20).build());
             favoriteButtons[i]=addRenderableWidget(Button.builder(Component.literal("☆"),b -> toggleFavorite(row))
@@ -105,6 +116,7 @@ public final class HeadShopScreen extends Screen {
             go[i]=addRenderableWidget(Button.builder(Component.literal("Go"),b -> travel(row))
                 .bounds(x+546,ry,33,20).build());
         }
+        HeadCatalogue.resolveHistory(minecraft,8);
         rebuildCatalogue();
     }
 
@@ -225,15 +237,44 @@ public final class HeadShopScreen extends Screen {
             if(!query.isEmpty() && !fav.name.toLowerCase(Locale.ROOT).contains(query))continue;
             boolean present=false;
             for(Entry e:found) if(HeadFavorites.id(e.head().displayName(),e.head().fingerprint()).equals(fav.id)) {present=true;break;}
-            if(!present)found.add(new Entry(new HeadFrameScanner.Head(BlockPos.ZERO,fav.name,fav.fingerprint,false),null,
+            if(!present)found.add(new Entry(new HeadFrameScanner.Head(fav.x==null || fav.y==null || fav.z==null?BlockPos.ZERO:new BlockPos(fav.x,fav.y,fav.z),fav.name,fav.fingerprint,false),null,
                 "No currently listed head (wishlist)",true));
         }
+        if(!selectedNation.isEmpty()) found.removeIf(e -> !selectedNation.equalsIgnoreCase(locationNation(e)));
+        if(!selectedTown.isEmpty()) found.removeIf(e -> !selectedTown.equalsIgnoreCase(locationTown(e)));
+        if(groupByTown) found.sort(Comparator.comparing((Entry e) -> normalized(locationNation(e)))
+            .thenComparing(e -> normalized(locationTown(e)))
+            .thenComparing(e -> normalized(e.head().displayName())));
         entries=found;
         updatePage();
     }
 
+    private static String normalized(String value) { return value==null?"~":value.toLowerCase(Locale.ROOT); }
+    private String locationTown(Entry e) {return travelTown(e);}
+    private String locationNation(Entry e) {return travelNation(e);}
+    private List<String> choices(boolean nation) {
+        java.util.TreeSet<String> values=new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        for(Entry e:catalogueEntries) {
+            String value=nation?locationNation(e):locationTown(e);
+            if(validName(value) && (nation || selectedNation.isEmpty() || selectedNation.equalsIgnoreCase(locationNation(e))))values.add(value);
+        }
+        return new ArrayList<>(values);
+    }
+    private void cycleNation() {
+        selectedNation=nextChoice(choices(true),selectedNation);
+        selectedTown="";page=0;filterEntries();
+    }
+    private void cycleTown() {selectedTown=nextChoice(choices(false),selectedTown);page=0;filterEntries();}
+    private static String nextChoice(List<String> values,String current) {
+        if(values.isEmpty())return "";
+        int index=values.indexOf(current);
+        return index<0?values.get(0):index+1<values.size()?values.get(index+1):"";
+    }
     /** Page changes touch only the already prepared rows; no world scan or quote matching. */
     private void updatePage() {
+        if(nationFilterButton!=null) nationFilterButton.setMessage(Component.literal("Nation: "+shorten(selectedNation.isEmpty()?"All":selectedNation,24)));
+        if(townFilterButton!=null) townFilterButton.setMessage(Component.literal("Town: "+shorten(selectedTown.isEmpty()?"All":selectedTown,24)));
+        if(groupButton!=null) groupButton.setMessage(Component.literal(groupByTown?"Group: Nation / Town":"Group: Off"));
         if(historyFilter!=null) historyFilter.setMessage(Component.literal(includeHistory?"History: all":"Nearby: seen now"));
         if(favoritesFilter!=null) favoritesFilter.setMessage(Component.literal(onlyFavorites?"★ Favorites only":"☆ Show favorites"));
         int totalPages=Math.max(1,(entries.size()+ROWS-1)/ROWS);
@@ -277,7 +318,10 @@ public final class HeadShopScreen extends Screen {
     }
     private void toggleFavorite(int row) {
         Entry e=rows[row]; if(e==null)return;
-        HeadFavorites.toggle(e.head().displayName(),e.head().fingerprint());
+        HeadCatalogue.SavedHead stored=storedRecord(e);
+        HeadFavorites.toggle(e.head().displayName(),e.head().fingerprint(),
+            stored==null?null:stored.dimension, stored==null?null:stored.pos(),
+            locationTown(e),locationNation(e));
         filterEntries();
     }
     private HeadCatalogue.SavedHead storedRecord(Entry e) {
@@ -288,17 +332,17 @@ public final class HeadShopScreen extends Screen {
         super.tick();
         // EarthMC location lookups are asynchronous. Refresh enabled buttons without rebuilding
         // price matching or scanning the world while the player is viewing this screen.
-        if(++locationRefreshTicks>=20) {locationRefreshTicks=0;updatePage();}
+        if(++locationRefreshTicks>=20) {locationRefreshTicks=0;filterEntries();}
     }
     private boolean knownTown(Entry e) {return validName(travelTown(e));}
     private boolean knownNation(Entry e) {return validName(travelNation(e));}
     private String travelTown(Entry e) {
         HeadCatalogue.SavedHead h=storedRecord(e);
-        return h!=null && validName(h.town)?h.town:(e.payment()==null?null:e.payment().town());
+        return h!=null && validName(h.town)?h.town:(e.payment()!=null && validName(e.payment().town())?e.payment().town():HeadFavorites.town(e.head().displayName(),e.head().fingerprint()));
     }
     private String travelNation(Entry e) {
         HeadCatalogue.SavedHead h=storedRecord(e);
-        return h!=null && validName(h.nation)?h.nation:(e.payment()==null?null:e.payment().nation());
+        return h!=null && validName(h.nation)?h.nation:(e.payment()!=null && validName(e.payment().nation())?e.payment().nation():HeadFavorites.nation(e.head().displayName(),e.head().fingerprint()));
     }
     private static int distance2(EarthMarketClient.DisplayQuote q, BlockPos p) {
         int x=q.x()-p.getX(), y=q.y()-p.getY(), z=q.z()-p.getZ();
@@ -310,6 +354,7 @@ public final class HeadShopScreen extends Screen {
         if(e.unavailable()) {minecraft.player.sendSystemMessage(Component.literal("[EM Market] Wishlisted head: "+e.head().displayName()+" (not currently listed)"));return;}
         minecraft.player.sendSystemMessage(Component.literal("[EM Market] Head: " + e.head().displayName()
             + " | style="+e.head().nameSource()+" color=#"+Integer.toHexString(e.head().nameColor())
+            + " | nation="+(locationNation(e)==null?"Unknown":locationNation(e))+" | town="+(locationTown(e)==null?"Unknown":locationTown(e))
             + " | frame="+p.getX()+","+p.getY()+","+p.getZ()
             + " | " + e.status() + " | payment mapping is proximity-only and NOT a verified head sale"
             + (e.payment()==null?"":(" | possible payment " + e.payment().bundlePrice()+"G / "
@@ -381,17 +426,17 @@ public final class HeadShopScreen extends Screen {
         super.extractRenderState(g,mx,my,delta);
         g.text(font,askOnly?"Head Not For Sale / Ask | unlinked or manually flagged":"Head shops | payment candidates (not verified)",x+9,y+8,0xFFFFFFFF,true);
         g.text(font,askOnly?"Ask the owner before assuming a decorative head is for sale.":"H outlines a frame; Move changes sale/ask category.",x+9,y+23,0xFFFFBE83,false);
-        g.text(font,"Head name / XYZ",x+9,y+65,0xFF98D8EF,false);
-        g.text(font,"Price / match",x+265,y+65,0xFF98D8EF,false);
+        g.text(font,"Head name / XYZ",x+9,y+96,0xFF98D8EF,false);
+        g.text(font,"Price / match",x+265,y+96,0xFF98D8EF,false);
         for(int i=0;i<ROWS;i++) {
             Entry e=rows[i]; if(e==null)continue;
-            int yy=y+85+i*30;
+            int yy=y+116+i*30;
             g.fill(x+5,yy-3,x+WIDTH-5,yy+24,i%2==0?0x66334455:0x44243341);
             BlockPos p=e.head().position();
             g.text(font,shorten(e.head().displayName(),25),x+9,yy,e.head().nameColor(),e.head().nameBold());
             HeadCatalogue.SavedHead stored=storedRecord(e);
-            String locality=stored==null?"":(validName(stored.town)?"  "+stored.town:stored.wilderness?"  Wilderness":"  Location pending");
-            g.text(font,shorten(e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ()+locality,38),x+9,yy+12,0xFFB8C8D2,false);
+            String locality="  "+(validName(locationNation(e))?locationNation(e):"Unknown")+" / "+(validName(locationTown(e))?locationTown(e):stored!=null && stored.wilderness?"Wilderness":"Unknown");
+            g.text(font,shorten(e.unavailable()?"Wishlist"+locality:p.getX()+", "+p.getY()+", "+p.getZ()+locality,41),x+9,yy+12,0xFFB8C8D2,false);
             var q=e.payment();
             g.text(font,shorten(q==null?"Price not linked":String.format(Locale.ROOT,"%.2fG / %dx",q.bundlePrice(),q.amount()),19),
                 x+265,yy,0xFFFFD17D,false);

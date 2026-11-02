@@ -22,6 +22,8 @@ public final class HeadFavorites {
         public String name;
         public String fingerprint;
         public long savedAt;
+        public String dimension, town, nation;
+        public Integer x,y,z;
         public Favorite() {}
         Favorite(String id, String name, String fingerprint) {
             this.id=id; this.name=name; this.fingerprint=fingerprint; savedAt=System.currentTimeMillis();
@@ -35,6 +37,30 @@ public final class HeadFavorites {
     }
     public static boolean contains(String name, String fingerprint) {
         return favorites.containsKey(id(name,fingerprint));
+    }
+    public static String town(String name,String fingerprint) {
+        Favorite f=favorites.get(id(name,fingerprint));return f==null?null:f.town;
+    }
+    public static String nation(String name,String fingerprint) {
+        Favorite f=favorites.get(id(name,fingerprint));return f==null?null:f.nation;
+    }
+    public static void updateLocation(String name,String fingerprint,String town,String nation) {
+        Favorite f=favorites.get(id(name,fingerprint));if(f==null)return;
+        if(java.util.Objects.equals(f.town,town) && java.util.Objects.equals(f.nation,nation))return;
+        if(town!=null)f.town=town;
+        if(nation!=null)f.nation=nation;
+        save();
+    }
+    public static void toggle(String name,String fingerprint,String dimension,net.minecraft.core.BlockPos pos,String town,String nation) {
+        String key=id(name,fingerprint);
+        if(favorites.containsKey(key))favorites.remove(key);
+        else {
+            Favorite f=new Favorite(key,name,fingerprint);
+            f.dimension=dimension;f.town=town;f.nation=nation;
+            if(pos!=null){f.x=pos.getX();f.y=pos.getY();f.z=pos.getZ();}
+            favorites.put(key,f);
+        }
+        save();
     }
     public static void toggle(String name, String fingerprint) {
         String key=id(name,fingerprint);
