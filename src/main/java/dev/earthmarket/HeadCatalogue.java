@@ -47,6 +47,15 @@ public final class HeadCatalogue {
     private static final Map<String,Long> locationRequests = new HashMap<>();
     private static int tickCounter;
     private static boolean dirty;
+    private static boolean detailedScan;
+    private static boolean blockScanActive;
+    private static BlockPos scanOrigin;
+    private static String scanDimension;
+    private static int scanIndex, scanDiscovered, scanWalls, scanFloor, scanAdded, scanUpdated;
+    private static final int RADIUS=16, HALF_HEIGHT=10, SIDE=RADIUS*2+1;
+    private static final int TOTAL=SIDE*SIDE*(HALF_HEIGHT*2+1);
+    private static final int BLOCK_BUDGET_PER_TICK=450;
+
     private static long lastWriteAt;
     private static final long SAVE_DEBOUNCE_MS = 8_000L;
     private HeadCatalogue() {}
@@ -74,11 +83,87 @@ public final class HeadCatalogue {
     public static void tick(Minecraft mc) {
         if (mc==null || mc.player==null || mc.level==null || !EarthMarketClient.isEarthMc(mc)) return;
         // Five seconds per scan, not two. This is a separate scanner from QuickShop signs.
-        if (++tickCounter % 100 == 0) scan(mc);
+        if (++tickCounter % 100 == 0) {
+            scan(mc);
+            if(!blockScanActive)startBlockScan(mc,false);
+        }
+        processBlockScan(mc);
         if (dirty && System.currentTimeMillis() - lastWriteAt >= SAVE_DEBOUNCE_MS) {
             write(); dirty = false; lastWriteAt = System.currentTimeMillis();
         }
     }
+    /** Manually starts a bounded, non-blocking scan; completes over multiple ticks. */
+    public static void manualScan(Minecraft mc) {
+        if(mc==null || mc.player==null || mc.level==null || !EarthMarketClient.isEarthMc(mc))return;
+        scan(mc);
+        startBlockScan(mc,true);
+        message(mc,"Wall/floor head scan started: 33x33 blocks, height +/-10. Results in chat when complete.");
+    }
+    private static void message(Minecraft mc,String text) {
+        if(mc.player!=null)mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("[EM Market] "+text));
+    }
+    private static void startBlockScan(Minecraft mc,boolean detailed) {
+        if(mc.player==null || mc.level==null)return;
+        scanOrigin=mc.player.blockPosition();
+        scanDimension=mc.level.dimension().toString();
+        scanIndex=scanDiscovered=scanWalls=scanFloor=scanAdded=scanUpdated=0;
+        detailedScan=detailed;
+        blockScanActive=true;
+    }
+    private static void processBlockScan(Minecraft mc) {
+        if(!blockScanActive || scanOrigin==null)return;
+        if(mc.player==null || mc.level==null || !scanDimension.equals(mc.level.dimension().toString())) {
+            blockScanActive=false;return;
+        }
+        // Player moved away: discard stale work; next periodic scan uses the new position.
+        if(mc.player.distanceToSqr(scanOrigin.getX()+.5,mc.player.getY(),scanOrigin.getZ()+.5)>32*32) {
+            blockScanActive=false;return;
+        }
+        int remaining=BLOCK_BUDGET_PER_TICK;
+        while(scanIndex<TOTAL && remaining-->0) {
+            int n=scanIndex++;
+            int horizontal=n%(SIDE*SIDE), dy=n/(SIDE*SIDE)-HALF_HEIGHT;
+            int dx=horizontal%SIDE-RADIUS, dz=horizontal/SIDE-RADIUS;
+            BlockPos p=scanOrigin.offset(dx,dy,dz);
+            if(!mc.level.hasChunkAt(p))continue;
+            // Checking the block state is cheap; retrieving a block entity happens ONLY for skulls.
+            var state=mc.level.getBlockState(p);
+            boolean wall=state.is(net.minecraft.world.level.block.Blocks.PLAYER_WALL_HEAD);
+            if(!wall && !state.is(net.minecraft.world.level.block.Blocks.PLAYER_HEAD))continue;
+            HeadFrameScanner.Head head=HeadFrameScanner.blockAt(mc,p);
+            if(head==null)continue;
+            scanDiscovered++;
+            if(wall)scanWalls++;else scanFloor++;
+            String k=key(scanDimension,p);
+            SavedHead old=saved.get(k);
+            if(old==null)scanAdded++;
+            else if(!java.util.Objects.equals(head.fingerprint(),old.fingerprint) ||
+                    !java.util.Objects.equals(head.displayName(),old.name))scanUpdated++;
+            recordHead(mc,scanDimension,head);
+        }
+        if(scanIndex>=TOTAL) {
+            blockScanActive=false;
+            if(detailedScan)message(mc,"Block scan complete: wall heads="+scanWalls+
+                ", floor heads="+scanFloor+", discovered="+scanDiscovered+
+                ", new="+scanAdded+", updated="+scanUpdated+
+                ". Head blocks without profile data are still recorded. Open Ask Heads -> Nearby.");
+            detailedScan=false;
+        }
+    }
+    private static void recordHead(Minecraft mc,String dimension,HeadFrameScanner.Head head) {
+        String k=key(dimension,head.position());
+        SavedHead old=saved.get(k);
+        if(old==null || !java.util.Objects.equals(old.name,head.displayName())
+           || !java.util.Objects.equals(old.fingerprint,head.fingerprint())
+           || old.nameColor!=head.nameColor() || old.nameBold!=head.nameBold()
+           || !java.util.Objects.equals(old.nameSource,head.nameSource())) {
+            SavedHead updated=new SavedHead(dimension,head);
+            if(old!=null){ updated.town=old.town;updated.nation=old.nation;updated.wilderness=old.wilderness; }
+            saved.put(k,updated);dirty=true;
+        } else old.lastSeen=System.currentTimeMillis();
+        missing.remove(k);
+    }
+
     public static void scan(Minecraft mc) {
         if(mc==null || mc.level==null || mc.player==null || !EarthMarketClient.isEarthMc(mc)) return;
         String dimension=mc.level.dimension().toString();
@@ -124,6 +209,13 @@ public final class HeadCatalogue {
             if(observed.contains(key)) continue;
             // The one-pass frame scan already populated observed. Avoid re-enumerating
             // ALL rendering entities once for every saved head (quadratic in busy shops).
+            // Block heads may not appear in the chunk's block-entity map at all.
+            // Only remove when the block itself is no longer a player head.
+            if("placed-block".equals(head.nameSource)) {
+                var state=mc.level.getBlockState(p);
+                if(state.is(net.minecraft.world.level.block.Blocks.PLAYER_HEAD)
+                   ||state.is(net.minecraft.world.level.block.Blocks.PLAYER_WALL_HEAD))continue;
+            }
             int count=missing.merge(key,1,Integer::sum);
             if(count>=3){ saved.remove(key); missing.remove(key); changed=true; }
         }

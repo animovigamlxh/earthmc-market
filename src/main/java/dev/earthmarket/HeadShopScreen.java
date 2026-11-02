@@ -200,7 +200,8 @@ public final class HeadShopScreen extends Screen {
         for(Entry e:catalogueEntries) {
             String dim=storedDimension(e);
             String choice=dim==null?"":HeadSaleStatus.get(dim,e.head().position(),e.head().fingerprint());
-            boolean asking="ask".equals(choice) || (!"sale".equals(choice) && e.payment()==null);
+            boolean placed="placed-block".equals(e.head().nameSource());
+            boolean asking="ask".equals(choice) || (!"sale".equals(choice) && (placed || e.payment()==null));
             if(!includeHistory) {
                 HeadCatalogue.SavedHead h=storedRecord(e);
                 if(h==null || !h.dimension.equals(minecraft.level.dimension().toString()) ||

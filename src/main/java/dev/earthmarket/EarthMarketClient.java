@@ -217,7 +217,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 }))
                 .then(literal("favhead").executes(ctx -> { QuickHeadFavorite.toggleAimed(Minecraft.getInstance()); return 1; }))
                 .then(literal("headscan").executes(ctx -> {
-                    refreshHeadFrames(Minecraft.getInstance(), true); return 1;
+                    HeadCatalogue.manualScan(Minecraft.getInstance()); return 1;
                 }))
                 .then(literal("autoscan")
                     .then(literal("on").executes(ctx -> { SIGNS.setAuto(true); SIGNS.start(Minecraft.getInstance()); say("Auto sign scan ON (every 30s or after moving to a new area)."); return 1; }))

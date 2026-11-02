@@ -1,0 +1,78 @@
+name: Build EarthMC Market 26.2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Install Gradle 9.5.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+
+      - name: Show build environment
+        run: |
+          java -version
+          gradle --version
+
+      - name: Check Chinese QuickShop parsing examples
+        run: |
+          mkdir -p build/parser-tests
+          javac -d build/parser-tests src/main/java/dev/earthmarket/QuickShopParser.java tests/QuickShopParserTest.java
+          java -cp build/parser-tests dev.earthmarket.QuickShopParserTest
+          javac -d build/parser-tests src/main/java/dev/earthmarket/SignShopParser.java tests/SignShopParserTest.java
+          java -cp build/parser-tests dev.earthmarket.SignShopParserTest
+
+      - name: Check enchantment chat parsing
+        run: |
+          javac -encoding UTF-8 -d build/parser-tests src/main/java/dev/earthmarket/EnchantChatParser.java tests/EnchantChatParserTest.java
+          java -ea -cp build/parser-tests EnchantChatParserTest
+
+      - name: Build Fabric mod
+        run: gradle build --stacktrace --no-daemon
+
+      - name: Upload installable mod JAR
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthmc-market-26.2-jar
+          path: |
+            build/libs/*.jar
+            !build/libs/*-sources.jar
+            !build/libs/*-dev.jar
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostic reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            build/reports/**
+            build/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7

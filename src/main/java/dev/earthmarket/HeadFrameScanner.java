@@ -95,6 +95,27 @@ public final class HeadFrameScanner {
         return out;
     }
 
+    /** Fallback for player heads whose block entities have not been advertised in the
+     * chunk's block-entity map. Only called on a small, per-tick budget. */
+    public static Head blockAt(Minecraft mc, BlockPos pos) {
+        if(mc==null || mc.level==null || !mc.level.hasChunkAt(pos))return null;
+        var state=mc.level.getBlockState(pos);
+        if(!state.is(Blocks.PLAYER_HEAD) && !state.is(Blocks.PLAYER_WALL_HEAD))return null;
+        Object profile=null;
+        var entity=mc.level.getBlockEntity(pos);
+        if(entity instanceof SkullBlockEntity skull) {
+            for(String method:new String[]{"getOwnerProfile","getProfile","getOwner"}) {
+                try {profile=skull.getClass().getMethod(method).invoke(skull);break;}
+                catch(ReflectiveOperationException ignored) {}
+            }
+        }
+        String owner=profileName(profile);
+        String name=owner==null?"Player Head (placed)":owner+"'s Head";
+        String identity=profile==null?"":profile.toString();
+        String fingerprint=identity.isBlank()?"":"head:"+Integer.toHexString(identity.hashCode());
+        return new Head(pos,name,fingerprint,!identity.isBlank(),DEFAULT_COLOR,false,"placed-block");
+    }
+
     public static List<Head> nearby(Minecraft mc) {
         List<Head> result = new ArrayList<>();
         if (mc == null || mc.level == null || mc.player == null) return result;
