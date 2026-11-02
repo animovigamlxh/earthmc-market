@@ -155,13 +155,8 @@ public final class HeadFrameScanner {
     /** Client versions differ in whether skull owner is exposed as a component,
      * ResolvableProfile, or a private field. Only use the data actually sent by the server. */
     private static Object skullProfile(SkullBlockEntity skull) {
-        try {
-            var components=skull.getComponents();
-            if(components!=null) {
-                Object direct=components.get(DataComponents.PROFILE);
-                if(direct!=null)return direct;
-            }
-        } catch (RuntimeException ignored) { }
+        // SkullBlockEntity has no getComponents() method in the 26.2 mappings.
+        // Inspect only supported runtime accessors/fields below.
         for(String method:new String[]{"getOwnerProfile","getProfile","getOwner"}) {
             Object value=invokeNoArg(skull,method);
             if(value!=null)return unwrap(value);
