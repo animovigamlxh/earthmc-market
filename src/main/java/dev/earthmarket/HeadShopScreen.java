@@ -43,6 +43,8 @@ public final class HeadShopScreen extends Screen {
     private Button historyFilter;
     private static boolean includeHistory = false;
     private final Map<String,HeadCatalogue.SavedHead> storedIndex = new HashMap<>();
+    private final Map<Entry,HeadCatalogue.SavedHead> rowRecord = new java.util.IdentityHashMap<>();
+    private int locationRefreshTicks;
     private static boolean onlyFavorites = false;
     private List<Entry> entries = List.of();
     private List<Entry> catalogueEntries = List.of();
@@ -114,6 +116,7 @@ public final class HeadShopScreen extends Screen {
         }
         List<HeadCatalogue.SavedHead> frames=HeadCatalogue.all();
         storedIndex.clear();
+        rowRecord.clear();
         for(HeadCatalogue.SavedHead frame:frames)storedIndex.put(frame.dimension+":"+frame.x+":"+frame.y+":"+frame.z,frame);
         List<EarthMarketClient.DisplayQuote> quotes=EarthMarketClient.displayQuotes();
         // Spatial bucket index: query just nearby signs, not the entire historical price catalogue.
@@ -176,7 +179,8 @@ public final class HeadShopScreen extends Screen {
                 status="Multiple off-axis payment signs: unconfirmed";
             }
             if(candidate==null)status="Sale unknown; ask owner (no linked payment sign)";
-            built.add(new Entry(head,candidate,status,false));
+            Entry item=new Entry(head,candidate,status,false);
+            built.add(item);rowRecord.put(item,stored);
         }
         built.sort(Comparator.comparing(e->e.head().displayName().toLowerCase(Locale.ROOT)));
         catalogueEntries=built;
@@ -277,12 +281,14 @@ public final class HeadShopScreen extends Screen {
         filterEntries();
     }
     private HeadCatalogue.SavedHead storedRecord(Entry e) {
-        if(e==null || e.unavailable())return null;
-        // Avoid a whole-catalogue traversal on each button refresh.
-        for(HeadCatalogue.SavedHead h:storedIndex.values()) {
-            if(h.pos().equals(e.head().position()) && Objects.equals(h.fingerprint,e.head().fingerprint())) return h;
-        }
-        return null;
+        HeadCatalogue.SavedHead original=rowRecord.get(e);
+        return original==null?null:HeadCatalogue.get(original.dimension,original.pos());
+    }
+    @Override public void tick() {
+        super.tick();
+        // EarthMC location lookups are asynchronous. Refresh enabled buttons without rebuilding
+        // price matching or scanning the world while the player is viewing this screen.
+        if(++locationRefreshTicks>=20) {locationRefreshTicks=0;updatePage();}
     }
     private boolean knownTown(Entry e) {return validName(travelTown(e));}
     private boolean knownNation(Entry e) {return validName(travelNation(e));}
@@ -376,20 +382,20 @@ public final class HeadShopScreen extends Screen {
         g.text(font,askOnly?"Head Not For Sale / Ask | unlinked or manually flagged":"Head shops | payment candidates (not verified)",x+9,y+8,0xFFFFFFFF,true);
         g.text(font,askOnly?"Ask the owner before assuming a decorative head is for sale.":"H outlines a frame; Move changes sale/ask category.",x+9,y+23,0xFFFFBE83,false);
         g.text(font,"Head name / XYZ",x+9,y+65,0xFF98D8EF,false);
-        g.text(font,"Candidate price / matching state",x+265,y+65,0xFF98D8EF,false);
+        g.text(font,"Price / match",x+265,y+65,0xFF98D8EF,false);
         for(int i=0;i<ROWS;i++) {
             Entry e=rows[i]; if(e==null)continue;
             int yy=y+85+i*30;
             g.fill(x+5,yy-3,x+WIDTH-5,yy+24,i%2==0?0x66334455:0x44243341);
             BlockPos p=e.head().position();
-            g.text(font,shorten(e.head().displayName(),32),x+9,yy,e.head().nameColor(),e.head().nameBold());
+            g.text(font,shorten(e.head().displayName(),25),x+9,yy,e.head().nameColor(),e.head().nameBold());
             HeadCatalogue.SavedHead stored=storedRecord(e);
             String locality=stored==null?"":(validName(stored.town)?"  "+stored.town:stored.wilderness?"  Wilderness":"  Location pending");
-            g.text(font,e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ()+locality,x+9,yy+12,0xFFB8C8D2,false);
+            g.text(font,shorten(e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ()+locality,38),x+9,yy+12,0xFFB8C8D2,false);
             var q=e.payment();
-            g.text(font,q==null?"Price not linked":String.format(Locale.ROOT,"%.2fG / %dx (%s)",q.bundlePrice(),q.amount(),shorten(q.item(),12)),
+            g.text(font,shorten(q==null?"Price not linked":String.format(Locale.ROOT,"%.2fG / %dx",q.bundlePrice(),q.amount()),19),
                 x+265,yy,0xFFFFD17D,false);
-            g.text(font,shorten(e.status(),37),x+265,yy+12,0xFFB8C8D2,false);
+            g.text(font,shorten(e.status(),19),x+265,yy+12,0xFFB8C8D2,false);
         }
         g.text(font,"Heads: "+entries.size()+" | page "+(page+1)+"/"+Math.max(1,(entries.size()+ROWS-1)/ROWS),
             x+9,y+HEIGHT-47,0xFFE2E6EB,false);

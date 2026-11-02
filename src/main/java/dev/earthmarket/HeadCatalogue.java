@@ -81,6 +81,7 @@ public final class HeadCatalogue {
         } catch (Exception e) { System.err.println("[EM Market] Head catalogue save error: "+e); }
     }
     public static List<SavedHead> all() { return new ArrayList<>(saved.values()); }
+    public static SavedHead get(String dimension,BlockPos position) {return saved.get(key(dimension,position));}
     public static void tick(Minecraft mc) {
         if (mc==null || mc.player==null || mc.level==null || !EarthMarketClient.isEarthMc(mc)) return;
         // Five seconds per scan, not two. This is a separate scanner from QuickShop signs.
@@ -164,6 +165,28 @@ public final class HeadCatalogue {
             saved.put(k,updated);dirty=true;
         } else old.lastSeen=System.currentTimeMillis();
         missing.remove(k);
+        requestLocation(mc,dimension,head);
+    }
+
+    /** Resolve placed heads as well as frames; manual block scan must not bypass this. */
+    private static void requestLocation(Minecraft mc,String dimension,HeadFrameScanner.Head head) {
+        String k=key(dimension,head.position());
+        SavedHead record=saved.get(k);
+        if(record==null || record.wilderness || record.town!=null || record.nation!=null)return;
+        long now=System.currentTimeMillis();
+        if(now-locationRequests.getOrDefault(k,0L)<120_000L)return;
+        locationRequests.put(k,now);
+        EarthLocationResolver.resolve(head.position().getX(),head.position().getZ(),result -> {
+            if(!result.ok())return;
+            mc.execute(() -> {
+                SavedHead current=saved.get(k);
+                if(current!=null && (java.util.Objects.equals(current.fingerprint,head.fingerprint())
+                    || head.fingerprint().isBlank())) {
+                    current.town=result.town();current.nation=result.nation();
+                    current.wilderness=result.wilderness();dirty=true;
+                }
+            });
+        });
     }
 
     /** A manually assigned label applies to this recorded head, not all same-named heads. */
