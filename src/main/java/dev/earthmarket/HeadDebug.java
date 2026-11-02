@@ -55,6 +55,12 @@ public final class HeadDebug {
                     if(java.lang.reflect.Modifier.isStatic(f.getModifiers()) || (!n.contains("owner") && !n.contains("profile") && !f.getType().getSimpleName().contains("Profile")))continue;
                     try { f.setAccessible(true);Object v=f.get(be);
                         say(mc,"Profile field="+f.getName()+" type="+type(v)+" present="+(v!=null));
+                        if(v!=null && (v.getClass().getName().startsWith("net.minecraft.") || v.getClass().getName().startsWith("com.mojang."))) {
+                            for(var pf:v.getClass().getDeclaredFields()) {
+                                if(java.lang.reflect.Modifier.isStatic(pf.getModifiers()))continue;
+                                say(mc,"Profile member="+pf.getName()+" kind="+pf.getType().getSimpleName());
+                            }
+                        }
                     } catch(ReflectiveOperationException | RuntimeException ignored) {say(mc,"Profile field inaccessible");}
                 }
             }

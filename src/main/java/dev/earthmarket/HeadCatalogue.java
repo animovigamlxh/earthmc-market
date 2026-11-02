@@ -247,7 +247,7 @@ public final class HeadCatalogue {
             // ALL rendering entities once for every saved head (quadratic in busy shops).
             // Block heads may not appear in the chunk's block-entity map at all.
             // Only remove when the block itself is no longer a player head.
-            if("placed-block".equals(head.nameSource)) {
+            if(head.nameSource!=null && head.nameSource.startsWith("placed-")) {
                 var state=mc.level.getBlockState(p);
                 if(state.is(net.minecraft.world.level.block.Blocks.PLAYER_HEAD)
                    ||state.is(net.minecraft.world.level.block.Blocks.PLAYER_WALL_HEAD))continue;

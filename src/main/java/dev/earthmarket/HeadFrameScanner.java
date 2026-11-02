@@ -67,6 +67,80 @@ public final class HeadFrameScanner {
         return best!=null && !tied ? best.component() : null;
     }
 
+    /** Jade-like block names: first use the head block entity custom name, then the
+     * picked block ItemStack's hover name. Reflection is intentionally limited to
+     * known read-only clone/pick methods across Minecraft 26.x mappings. */
+    private static Component placedHeadName(Minecraft mc, BlockPos pos, SkullBlockEntity skull) {
+        if(skull!=null) {
+            for(String method:new String[]{"getCustomName", "getDisplayName", "getName"}) {
+                Object value=invokeNoArg(skull,method);
+                if(value instanceof Component label && usableHeadName(label.getString()))return label;
+            }
+            // Some versions retain a custom-name field but do not expose an accessor.
+            for(Class<?> type=skull.getClass();type!=null && type!=Object.class;type=type.getSuperclass()) {
+                for(var field:type.getDeclaredFields()) {
+                    if(java.lang.reflect.Modifier.isStatic(field.getModifiers()) ||
+                       !field.getName().toLowerCase(java.util.Locale.ROOT).contains("customname"))continue;
+                    try {
+                        field.setAccessible(true);
+                        Object v=unwrap(field.get(skull));
+                        if(v instanceof Component label && usableHeadName(label.getString()))return label;
+                    } catch(RuntimeException | ReflectiveOperationException ignored) {}
+                }
+            }
+        }
+        if(mc==null || mc.level==null)return null;
+        var state=mc.level.getBlockState(pos);
+        for(Object target:new Object[]{state,state.getBlock()}) {
+            for(Class<?> type=target.getClass();type!=null && type!=Object.class;type=type.getSuperclass()) {
+                for(Method method:type.getDeclaredMethods()) {
+                    String mn=method.getName();
+                    if(!mn.equals("getCloneItemStack") && !mn.equals("getPickBlock"))continue;
+                    if(java.lang.reflect.Modifier.isStatic(method.getModifiers()) ||
+                       !ItemStack.class.isAssignableFrom(method.getReturnType()))continue;
+                    Class<?>[] params=method.getParameterTypes();
+                    Object[] args=new Object[params.length];boolean valid=params.length>0 && params.length<=5;
+                    for(int i=0;i<params.length && valid;i++) {
+                        Class<?> t=params[i];
+                        if(t.isInstance(mc.level))args[i]=mc.level;
+                        else if(t.isInstance(pos))args[i]=pos;
+                        else if(t.isInstance(state))args[i]=state;
+                        else if(t==boolean.class || t==Boolean.class)args[i]=false;
+                        else valid=false;
+                    }
+                    if(!valid)continue;
+                    try {
+                        method.setAccessible(true);
+                        Object result=method.invoke(target,args);
+                        if(result instanceof ItemStack stack && stack.is(Items.PLAYER_HEAD)) {
+                            Component label=stack.getHoverName();
+                            if(usableHeadName(label.getString()))return label;
+                        }
+                    } catch(RuntimeException | ReflectiveOperationException ignored) {}
+                }
+            }
+        }
+        return null;
+    }
+    private static boolean usableHeadName(String text) {
+        if(text==null || text.isBlank())return false;
+        String n=text.strip().toLowerCase(java.util.Locale.ROOT);
+        return !n.equals("player head") && !n.equals("player head (placed)")
+            && !n.equals("headDatabase's head".toLowerCase(java.util.Locale.ROOT))
+            && !n.equals("玩家头颅") && !n.equals("玩家的头") && !n.equals("头颅");
+    }
+    private static Head placedHead(Minecraft mc,BlockPos pos,SkullBlockEntity skull) {
+        Object profile=skull==null?null:skullProfile(skull);
+        String owner=profileName(profile);
+        String identity=profileIdentity(profile);
+        Component label=placedHeadName(mc,pos,skull);
+        String name=label!=null?label.getString().strip():
+            (owner==null || owner.equalsIgnoreCase("HeadDatabase")?"Player Head (placed)":owner+"'s Head");
+        String source=label!=null?"placed-custom-name":"placed-block";
+        return new Head(pos,name,identity.isBlank()?"":"skin:"+sha256(identity),
+            !identity.isBlank(),label==null?DEFAULT_COLOR:color(label),label!=null && bold(label),source);
+    }
+
     /** Loaded-chunk block heads. Scans block-entity maps, not every block position. */
     public static List<Head> nearbyBlocks(Minecraft mc) {
         List<Head> out = new ArrayList<>();
@@ -80,12 +154,7 @@ public final class HeadFrameScanner {
                 if(pos==null || mc.player.distanceToSqr(pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5)>48*48)continue;
                 var block=mc.level.getBlockState(pos).getBlock();
                 if(block!=Blocks.PLAYER_HEAD && block!=Blocks.PLAYER_WALL_HEAD)continue;
-                Object profile=skullProfile(skull);
-                String owner=profileName(profile);
-                String identity=profileIdentity(profile);
-                String name=owner==null || owner.equalsIgnoreCase("HeadDatabase")?"Player Head (placed)":owner+"'s Head";
-                out.add(new Head(pos,name,identity.isBlank()?"":"skin:"+sha256(identity),
-                    !identity.isBlank(),DEFAULT_COLOR,false,"placed-block"));
+                out.add(placedHead(mc,pos,skull));
             }
         }
         return out;
@@ -97,14 +166,8 @@ public final class HeadFrameScanner {
         if(mc==null || mc.level==null || !mc.level.hasChunkAt(pos))return null;
         var state=mc.level.getBlockState(pos);
         if(!state.is(Blocks.PLAYER_HEAD) && !state.is(Blocks.PLAYER_WALL_HEAD))return null;
-        Object profile=null;
         var entity=mc.level.getBlockEntity(pos);
-        if(entity instanceof SkullBlockEntity skull) profile=skullProfile(skull);
-        String owner=profileName(profile);
-        String name=owner==null || owner.equalsIgnoreCase("HeadDatabase")?"Player Head (placed)":owner+"'s Head";
-        String identity=profileIdentity(profile);
-        String fingerprint=identity.isBlank()?"":"skin:"+sha256(identity);
-        return new Head(pos,name,fingerprint,!identity.isBlank(),DEFAULT_COLOR,false,"placed-block");
+        return placedHead(mc,pos,entity instanceof SkullBlockEntity skull ? skull : null);
     }
 
     public static List<Head> nearby(Minecraft mc) {
@@ -231,47 +294,82 @@ public final class HeadFrameScanner {
                     return "skin-patch:"+v;
             }
         }
-        String name=profileName(profile);
-        if(name==null || name.equalsIgnoreCase("HeadDatabase"))return "";
-        Object uuid=invokeNoArg(actual,"id");
-        if(uuid==null)uuid=invokeNoArg(actual,"getId");
-        if(uuid instanceof java.util.UUID)return "uuid:"+uuid;
-        return "name:"+name.toLowerCase(java.util.Locale.ROOT);
-    }
-    private static String textureProperty(Object profile) {
-        if(profile==null)return "";
-        Object props=invokeNoArg(profile,"properties");
-        if(props==null)props=invokeNoArg(profile,"getProperties");
-        if(props==null)return "";
-        Object textures=invokeOneArg(props,"get","textures");
-        String value=textureValue(textures);
-        if(!value.isBlank())return value;
-        return textureValue(props);
-    }
-    private static Object invokeOneArg(Object object,String method,Object argument) {
-        if(object==null)return null;
-        try {return object.getClass().getMethod(method,String.class).invoke(object,argument);}
-        catch(ReflectiveOperationException | RuntimeException ignored) {return null;}
-    }
-    private static String textureValue(Object prop) {
-        if(prop==null)return "";
-        if(prop instanceof Iterable<?> iterable) {
-            for(Object element:iterable) {String value=textureValue(element);if(!value.isBlank())return value;}
-            return "";
-        }
-        // Guava property collection may be a map: iterate only textures properties.
-        if(prop instanceof java.util.Map<?,?> map) {
-            Object textures=map.get("textures");
-            return textureValue(textures);
-        }
-        Object name=invokeNoArg(prop,"name");
-        if(name==null)name=invokeNoArg(prop,"getName");
-        if(name!=null && !"textures".equalsIgnoreCase(name.toString()))return "";
-        Object value=invokeNoArg(prop,"value");
-        if(value==null)value=invokeNoArg(prop,"getValue");
-        if(value instanceof String text && !text.isBlank())return text;
         return "";
     }
+    private static String textureProperty(Object profile) {
+        return findTexture(profile, new java.util.IdentityHashMap<>(), 0, false);
+    }
+    private static String findTexture(Object obj, java.util.IdentityHashMap<Object, Boolean> seen,
+                                      int depth, boolean textureContext) {
+        if(obj==null || depth>7 || seen.put(obj,Boolean.TRUE)!=null)return "";
+        if(obj instanceof String s)return textureContext && s.length()>32 && looksLikeTexture(s)?s:"";
+        if(obj instanceof java.util.Optional<?> optional)
+            return findTexture(optional.orElse(null),seen,depth+1,textureContext);
+        if(obj instanceof Iterable<?> iterable) {
+            int count=0;
+            for(Object v:iterable){if(count++>=128)break;
+                String found=findTexture(v,seen,depth+1,textureContext);
+                if(!found.isBlank())return found;}
+            return "";
+        }
+        if(obj instanceof java.util.Map<?,?> map) {
+            int count=0;
+            for(var e:map.entrySet()) {if(count++>=128)break;
+                String key=String.valueOf(e.getKey()).toLowerCase(java.util.Locale.ROOT);
+                String found=findTexture(e.getValue(),seen,depth+1,textureContext || key.contains("texture"));
+                if(!found.isBlank())return found;
+            }
+            return "";
+        }
+        // Mojang authlib Property: verify name == textures before using its value.
+        Object propertyName=invokeNoArg(obj,"name");
+        if(propertyName==null)propertyName=invokeNoArg(obj,"getName");
+        if("textures".equalsIgnoreCase(String.valueOf(propertyName))) {
+            Object v=invokeNoArg(obj,"value");
+            if(v==null)v=invokeNoArg(obj,"getValue");
+            if(v instanceof String s && looksLikeTexture(s))return s;
+            String found=findTexture(v,seen,depth+1,true);
+            if(!found.isBlank())return found;
+        }
+        for(String method:new String[]{"properties","getProperties","profile","getProfile",
+                   "partialProfile","getGameProfile","textures","getTextures","skinPatch"}) {
+            Object v=invokeNoArg(obj,method);
+            if(v!=null && v!=obj) {
+                String found=findTexture(v,seen,depth+1,textureContext || method.toLowerCase().contains("texture"));
+                if(!found.isBlank())return found;
+            }
+        }
+        String className=obj.getClass().getName();
+        if(!(className.startsWith("net.minecraft.") || className.startsWith("com.mojang.authlib.")))return "";
+        for(Class<?> t=obj.getClass();t!=null && t!=Object.class;t=t.getSuperclass()) {
+            for(var field:t.getDeclaredFields()) {
+                if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;
+                String name=field.getName().toLowerCase(java.util.Locale.ROOT);
+                String type=field.getType().getName().toLowerCase(java.util.Locale.ROOT);
+                if(!(name.contains("profile")||name.contains("propert")||name.contains("texture")||
+                     name.contains("skin")||name.equals("value")||name.equals("gameprofile")||
+                     type.contains("profile")||type.contains("property")))continue;
+                try {
+                    field.setAccessible(true);
+                    String found=findTexture(field.get(obj),seen,depth+1,textureContext || name.contains("texture"));
+                    if(!found.isBlank())return found;
+                } catch(ReflectiveOperationException | RuntimeException ignored) {}
+            }
+        }
+        return "";
+    }
+    private static boolean looksLikeTexture(String value) {
+        // Minecraft player textures use a long base64 property; reject names / IDs.
+        if(value.length()<40 || value.length()>200000)return false;
+        if(value.startsWith("http://")||value.startsWith("https://"))return true;
+        if(!value.matches("[A-Za-z0-9_+/=\\-]+"))return false;
+        try {
+            byte[] data=java.util.Base64.getDecoder().decode(value);
+            String text=new String(data, java.nio.charset.StandardCharsets.UTF_8);
+            return text.contains("textures") && text.contains("SKIN");
+        } catch(IllegalArgumentException ignored) {return false;}
+    }
+
     private static String sha256(String value) {
         try {
             byte[] hash=java.security.MessageDigest.getInstance("SHA-256")
