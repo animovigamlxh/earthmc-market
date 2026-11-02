@@ -25,6 +25,8 @@ public final class HeadShopScreen extends Screen {
     private static final int WIDTH = 590;
     private static final int HEIGHT = 292;
     private final Screen previous;
+    private final boolean askOnly;
+    private final Button[] classifyButtons = new Button[ROWS];
     private int page;
     private final Entry[] rows = new Entry[ROWS];
     private final Button[] details = new Button[ROWS];
@@ -44,6 +46,13 @@ public final class HeadShopScreen extends Screen {
     public HeadShopScreen(Screen previous) {
         super(Component.literal("EarthMC Head Shops"));
         this.previous = previous;
+        this.askOnly = false;
+    }
+
+    public HeadShopScreen(Screen previous, boolean askOnly) {
+        super(Component.literal(askOnly ? "Head Not For Sale / Ask" : "EarthMC Head Shops"));
+        this.previous = previous;
+        this.askOnly = askOnly;
     }
 
     record Entry(HeadFrameScanner.Head head, EarthMarketClient.DisplayQuote payment, String status, boolean unavailable) {}
@@ -55,6 +64,9 @@ public final class HeadShopScreen extends Screen {
         search.setValue(previousQuery);
         search.setResponder(value -> { previousQuery=value; page=0; filterEntries(); });
         addRenderableWidget(search);
+        addRenderableWidget(Button.builder(Component.literal(askOnly ? "Shop Heads" : "Ask Heads"),
+            b -> minecraft.gui.setScreen(new HeadShopScreen(previous,!askOnly)))
+            .bounds(x+472,y+41,109,19).build());
         favoritesFilter = addRenderableWidget(Button.builder(Component.literal(""), b -> {onlyFavorites=!onlyFavorites;page=0;filterEntries();})
             .bounds(x+323,y+41,145,19).build());
         backPage = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; updatePage();})
@@ -68,6 +80,8 @@ public final class HeadShopScreen extends Screen {
         for (int i=0;i<ROWS;i++) {
             final int row=i;
             int ry=y+83+i*30;
+            classifyButtons[i]=addRenderableWidget(Button.builder(Component.literal("Move"),b -> moveCategory(row))
+                .bounds(x+367,ry,43,20).build());
             favoriteButtons[i]=addRenderableWidget(Button.builder(Component.literal("☆"),b -> toggleFavorite(row))
                 .bounds(x+414,ry,22,20).build());
             details[i]=addRenderableWidget(Button.builder(Component.literal("i"),b -> info(row))
@@ -176,12 +190,16 @@ public final class HeadShopScreen extends Screen {
         String query=(search==null?previousQuery:search.getValue()).strip().toLowerCase(Locale.ROOT);
         List<Entry> found=new ArrayList<>();
         for(Entry e:catalogueEntries) {
+            String dim=storedDimension(e);
+            String choice=dim==null?"":HeadSaleStatus.get(dim,e.head().position(),e.head().fingerprint());
+            boolean asking="ask".equals(choice) || (!"sale".equals(choice) && e.payment()==null);
+            if(asking!=askOnly)continue;
             if(!query.isEmpty() && !e.head().displayName().toLowerCase(Locale.ROOT).contains(query)
                 && !e.head().fingerprint().toLowerCase(Locale.ROOT).contains(query))continue;
             if(onlyFavorites && !HeadFavorites.contains(e.head().displayName(),e.head().fingerprint()))continue;
             found.add(e);
         }
-        if(onlyFavorites) for(HeadFavorites.Favorite fav:HeadFavorites.all()) {
+        if(onlyFavorites && askOnly) for(HeadFavorites.Favorite fav:HeadFavorites.all()) {
             if(!query.isEmpty() && !fav.name.toLowerCase(Locale.ROOT).contains(query))continue;
             boolean present=false;
             for(Entry e:found) if(HeadFavorites.id(e.head().displayName(),e.head().fingerprint()).equals(fav.id)) {present=true;break;}
@@ -201,6 +219,11 @@ public final class HeadShopScreen extends Screen {
         if (nextPage!=null) nextPage.active=page+1<totalPages;
         for(int i=0;i<ROWS;i++) {
             rows[i]=page*ROWS+i<entries.size()?entries.get(page*ROWS+i):null;
+            if(classifyButtons[i]!=null) {
+                classifyButtons[i].visible=rows[i]!=null && !rows[i].unavailable();
+                classifyButtons[i].active=classifyButtons[i].visible;
+                classifyButtons[i].setMessage(Component.literal(askOnly?"Sale":"Ask"));
+            }
             if(details[i]!=null) {details[i].visible=rows[i]!=null;details[i].active=rows[i]!=null;}
             if(go[i]!=null) {go[i].visible=rows[i]!=null;go[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null;}
             if(townButtons[i]!=null) {townButtons[i].visible=rows[i]!=null;townButtons[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null && validName(rows[i].payment().town());}
@@ -214,6 +237,13 @@ public final class HeadShopScreen extends Screen {
         }
     }
 
+    private void moveCategory(int row) {
+        Entry e=rows[row]; if(e==null || e.unavailable())return;
+        String dim=storedDimension(e);
+        if(dim==null)return;
+        HeadSaleStatus.set(dim,e.head().position(),e.head().fingerprint(),askOnly?"sale":"ask");
+        filterEntries();
+    }
     private void toggleFavorite(int row) {
         Entry e=rows[row]; if(e==null)return;
         HeadFavorites.toggle(e.head().displayName(),e.head().fingerprint());
@@ -295,8 +325,8 @@ public final class HeadShopScreen extends Screen {
         g.fill(x,y,x+WIDTH,y+HEIGHT,0xF0101821);
         g.outline(x,y,WIDTH,HEIGHT,0xFF658AA0);
         super.extractRenderState(g,mx,my,delta);
-        g.text(font,"Head shops | saved frames (auto-pruned when confirmed missing)",x+9,y+8,0xFFFFFFFF,true);
-        g.text(font,"Search left; H outlines nearby frame; absent loaded heads removed after 3 checks.",x+9,y+23,0xFFFFBE83,false);
+        g.text(font,askOnly?"Head Not For Sale / Ask | unlinked or manually flagged":"Head shops | payment candidates (not verified)",x+9,y+8,0xFFFFFFFF,true);
+        g.text(font,askOnly?"Ask the owner before assuming a decorative head is for sale.":"H outlines a frame; Move changes sale/ask category.",x+9,y+23,0xFFFFBE83,false);
         g.text(font,"Head name / frame XYZ",x+9,y+65,0xFF98D8EF,false);
         g.text(font,"Candidate price / matching state",x+265,y+65,0xFF98D8EF,false);
         for(int i=0;i<ROWS;i++) {
@@ -313,7 +343,7 @@ public final class HeadShopScreen extends Screen {
         }
         g.text(font,"Loaded frames: "+entries.size()+" | page "+(page+1)+"/"+Math.max(1,(entries.size()+ROWS-1)/ROWS),
             x+9,y+HEIGHT-47,0xFFE2E6EB,false);
-        g.text(font,"★: wishlist | H: highlight | T/N: manual spawn | Go: automatic",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
+        g.text(font,"Move: switch category | ★: save | H: frame | T/N/Go: if location known",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
     }
     @Override public void onClose() {minecraft.gui.setScreen(previous);}
 }
