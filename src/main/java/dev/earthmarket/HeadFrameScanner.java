@@ -6,6 +6,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.entity.SkullBlockEntity;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.core.component.DataComponents;
 
 import java.lang.reflect.Method;
@@ -63,6 +65,34 @@ public final class HeadFrameScanner {
             } catch(ReflectiveOperationException ignored) {}
         }
         return best!=null && !tied ? best.component() : null;
+    }
+
+    /** Loaded-chunk block heads. Scans block-entity maps, not every block position. */
+    public static List<Head> nearbyBlocks(Minecraft mc) {
+        List<Head> out = new ArrayList<>();
+        if(mc==null || mc.player==null || mc.level==null) return out;
+        int cx=mc.player.getBlockX()>>4, cz=mc.player.getBlockZ()>>4;
+        for(int x=cx-3;x<=cx+3;x++) for(int z=cz-3;z<=cz+3;z++) {
+            if(!mc.level.hasChunkAt(new BlockPos(x*16,mc.player.getBlockY(),z*16)))continue;
+            for(var entry:mc.level.getChunk(x,z).getBlockEntities().entrySet()) {
+                if(!(entry.getValue() instanceof SkullBlockEntity skull))continue;
+                BlockPos pos=entry.getKey();
+                if(pos==null || mc.player.distanceToSqr(pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5)>48*48)continue;
+                var block=mc.level.getBlockState(pos).getBlock();
+                if(block!=Blocks.PLAYER_HEAD && block!=Blocks.PLAYER_WALL_HEAD)continue;
+                Object profile=null;
+                for(String method:new String[]{"getOwnerProfile","getProfile","getOwner"}) {
+                    try { profile=skull.getClass().getMethod(method).invoke(skull); break; }
+                    catch(ReflectiveOperationException ignored) {}
+                }
+                String owner=profileName(profile);
+                String name=owner==null?"Player Head (placed)":owner+"'s Head";
+                String identity=profile==null?"":profile.toString();
+                out.add(new Head(pos,name,identity.isBlank()?"":"head:"+Integer.toHexString(identity.hashCode()),
+                    !identity.isBlank(),DEFAULT_COLOR,false,"placed-block"));
+            }
+        }
+        return out;
     }
 
     public static List<Head> nearby(Minecraft mc) {

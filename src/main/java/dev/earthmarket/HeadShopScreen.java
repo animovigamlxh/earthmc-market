@@ -39,6 +39,9 @@ public final class HeadShopScreen extends Screen {
     private final Button[] highlight = new Button[ROWS];
     private final Button[] favoriteButtons = new Button[ROWS];
     private Button favoritesFilter;
+    private Button historyFilter;
+    private static boolean includeHistory = false;
+    private final Map<String,HeadCatalogue.SavedHead> storedIndex = new HashMap<>();
     private static boolean onlyFavorites = false;
     private List<Entry> entries = List.of();
     private List<Entry> catalogueEntries = List.of();
@@ -67,6 +70,8 @@ public final class HeadShopScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal(askOnly ? "Shop Heads" : "Ask Heads"),
             b -> minecraft.gui.setScreen(new HeadShopScreen(previous,!askOnly)))
             .bounds(x+472,y+41,109,19).build());
+        historyFilter=addRenderableWidget(Button.builder(Component.literal(""), b -> {includeHistory=!includeHistory;page=0;filterEntries();})
+            .bounds(x+343,y+HEIGHT-27,140,20).build());
         favoritesFilter = addRenderableWidget(Button.builder(Component.literal(""), b -> {onlyFavorites=!onlyFavorites;page=0;filterEntries();})
             .bounds(x+323,y+41,145,19).build());
         backPage = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; updatePage();})
@@ -105,6 +110,8 @@ public final class HeadShopScreen extends Screen {
             catalogueEntries=List.of(); filterEntries(); return;
         }
         List<HeadCatalogue.SavedHead> frames=HeadCatalogue.all();
+        storedIndex.clear();
+        for(HeadCatalogue.SavedHead frame:frames)storedIndex.put(frame.dimension+":"+frame.x+":"+frame.y+":"+frame.z,frame);
         List<EarthMarketClient.DisplayQuote> quotes=EarthMarketClient.displayQuotes();
         // Spatial bucket index: query just nearby signs, not the entire historical price catalogue.
         Map<String,List<EarthMarketClient.DisplayQuote>> buckets=new HashMap<>();
@@ -165,6 +172,7 @@ public final class HeadShopScreen extends Screen {
             } else if(nearby.size()>1) {
                 status="Multiple off-axis payment signs: unconfirmed";
             }
+            if(candidate==null)status="Sale unknown; ask owner (no linked payment sign)";
             built.add(new Entry(head,candidate,status,false));
         }
         built.sort(Comparator.comparing(e->e.head().displayName().toLowerCase(Locale.ROOT)));
@@ -193,13 +201,19 @@ public final class HeadShopScreen extends Screen {
             String dim=storedDimension(e);
             String choice=dim==null?"":HeadSaleStatus.get(dim,e.head().position(),e.head().fingerprint());
             boolean asking="ask".equals(choice) || (!"sale".equals(choice) && e.payment()==null);
+            if(!includeHistory) {
+                HeadCatalogue.SavedHead h=storedRecord(e);
+                if(h==null || !h.dimension.equals(minecraft.level.dimension().toString()) ||
+                    System.currentTimeMillis()-h.lastSeen>60_000L ||
+                    minecraft.player.distanceToSqr(h.x+.5,h.y+.5,h.z+.5)>48*48)continue;
+            }
             if(asking!=askOnly)continue;
             if(!query.isEmpty() && !e.head().displayName().toLowerCase(Locale.ROOT).contains(query)
                 && !e.head().fingerprint().toLowerCase(Locale.ROOT).contains(query))continue;
             if(onlyFavorites && !HeadFavorites.contains(e.head().displayName(),e.head().fingerprint()))continue;
             found.add(e);
         }
-        if(onlyFavorites && askOnly) for(HeadFavorites.Favorite fav:HeadFavorites.all()) {
+        if(onlyFavorites && askOnly && includeHistory) for(HeadFavorites.Favorite fav:HeadFavorites.all()) {
             if(!query.isEmpty() && !fav.name.toLowerCase(Locale.ROOT).contains(query))continue;
             boolean present=false;
             for(Entry e:found) if(HeadFavorites.id(e.head().displayName(),e.head().fingerprint()).equals(fav.id)) {present=true;break;}
@@ -212,6 +226,7 @@ public final class HeadShopScreen extends Screen {
 
     /** Page changes touch only the already prepared rows; no world scan or quote matching. */
     private void updatePage() {
+        if(historyFilter!=null) historyFilter.setMessage(Component.literal(includeHistory?"History: all":"Nearby: seen now"));
         if(favoritesFilter!=null) favoritesFilter.setMessage(Component.literal(onlyFavorites?"★ Favorites only":"☆ Show favorites"));
         int totalPages=Math.max(1,(entries.size()+ROWS-1)/ROWS);
         page=Math.max(0,Math.min(page,totalPages-1));
@@ -225,9 +240,9 @@ public final class HeadShopScreen extends Screen {
                 classifyButtons[i].setMessage(Component.literal(askOnly?"Sale":"Ask"));
             }
             if(details[i]!=null) {details[i].visible=rows[i]!=null;details[i].active=rows[i]!=null;}
-            if(go[i]!=null) {go[i].visible=rows[i]!=null;go[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null;}
-            if(townButtons[i]!=null) {townButtons[i].visible=rows[i]!=null;townButtons[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null && validName(rows[i].payment().town());}
-            if(nationButtons[i]!=null) {nationButtons[i].visible=rows[i]!=null;nationButtons[i].active=rows[i]!=null && !rows[i].unavailable() && rows[i].payment()!=null && validName(rows[i].payment().nation());}
+            if(go[i]!=null) {go[i].visible=rows[i]!=null;go[i].active=rows[i]!=null && !rows[i].unavailable() && (knownTown(rows[i]) || knownNation(rows[i]));}
+            if(townButtons[i]!=null) {townButtons[i].visible=rows[i]!=null;townButtons[i].active=rows[i]!=null && !rows[i].unavailable() && knownTown(rows[i]);}
+            if(nationButtons[i]!=null) {nationButtons[i].visible=rows[i]!=null;nationButtons[i].active=rows[i]!=null && !rows[i].unavailable() && knownNation(rows[i]);}
             if(highlight[i]!=null) {highlight[i].visible=rows[i]!=null;highlight[i].active=rows[i]!=null && !rows[i].unavailable();}
             if(favoriteButtons[i]!=null) {
                 favoriteButtons[i].visible=rows[i]!=null;
@@ -248,6 +263,24 @@ public final class HeadShopScreen extends Screen {
         Entry e=rows[row]; if(e==null)return;
         HeadFavorites.toggle(e.head().displayName(),e.head().fingerprint());
         filterEntries();
+    }
+    private HeadCatalogue.SavedHead storedRecord(Entry e) {
+        if(e==null || e.unavailable())return null;
+        // Avoid a whole-catalogue traversal on each button refresh.
+        for(HeadCatalogue.SavedHead h:storedIndex.values()) {
+            if(h.pos().equals(e.head().position()) && Objects.equals(h.fingerprint,e.head().fingerprint())) return h;
+        }
+        return null;
+    }
+    private boolean knownTown(Entry e) {return validName(travelTown(e));}
+    private boolean knownNation(Entry e) {return validName(travelNation(e));}
+    private String travelTown(Entry e) {
+        HeadCatalogue.SavedHead h=storedRecord(e);
+        return h!=null && validName(h.town)?h.town:(e.payment()==null?null:e.payment().town());
+    }
+    private String travelNation(Entry e) {
+        HeadCatalogue.SavedHead h=storedRecord(e);
+        return h!=null && validName(h.nation)?h.nation:(e.payment()==null?null:e.payment().nation());
     }
     private static int distance2(EarthMarketClient.DisplayQuote q, BlockPos p) {
         int x=q.x()-p.getX(), y=q.y()-p.getY(), z=q.z()-p.getZ();
@@ -289,8 +322,8 @@ public final class HeadShopScreen extends Screen {
     /** T/N never guess a capital. Still arm the exact head frame as arrival target. */
     private void travelExplicit(int row, boolean nation) {
         Entry e=rows[row];
-        if(e==null || e.unavailable() || e.payment()==null)return;
-        String destination=nation?e.payment().nation():e.payment().town();
+        if(e==null || e.unavailable())return;
+        String destination=nation?travelNation(e):travelTown(e);
         if(!validName(destination))return;
         String dimension=storedDimension(e);
         if(dimension==null)return;
@@ -300,20 +333,23 @@ public final class HeadShopScreen extends Screen {
         minecraft.gui.setScreen(new ChatScreen(command,false));
     }
     private String storedDimension(Entry e) {
-        for(HeadCatalogue.SavedHead saved:HeadCatalogue.all()) {
-            if(saved.pos().equals(e.head().position()) && Objects.equals(saved.fingerprint,e.head().fingerprint()))
-                return saved.dimension;
-        }
-        return null;
+        HeadCatalogue.SavedHead saved=storedRecord(e);
+        return saved==null?null:saved.dimension;
     }
     private void travel(int row) {
-        Entry e=rows[row]; if(e==null || e.payment()==null) return;
+        Entry e=rows[row]; if(e==null) return;
         String dim=storedDimension(e);
         if(dim==null) {info(row);return;}
         // Close our screen first; the capital API callback will open the chat draft.
         minecraft.gui.setScreen(null);
         // The payment sign is only a travel clue, never the highlighted target.
-        CapitalTravelResolver.prepare(minecraft,e.payment().town(),e.payment().nation(),e.payment(),
+        String town=travelTown(e),nation=travelNation(e);
+        if(!validName(town) && !validName(nation)) {
+            minecraft.player.sendSystemMessage(Component.literal("[EM Market] Location unavailable. Visit this head and refresh to resolve town/nation."));
+            return;
+        }
+        EarthMarketClient.DisplayQuote clue=e.payment()!=null?e.payment():PendingShopTravel.headQuote(e.head().position(),dim,e.head().displayName());
+        CapitalTravelResolver.prepare(minecraft,town,nation,clue,
             e.head().position(),dim,e.head().displayName());
     }
     private static String shorten(String value,int limit) {
@@ -327,7 +363,7 @@ public final class HeadShopScreen extends Screen {
         super.extractRenderState(g,mx,my,delta);
         g.text(font,askOnly?"Head Not For Sale / Ask | unlinked or manually flagged":"Head shops | payment candidates (not verified)",x+9,y+8,0xFFFFFFFF,true);
         g.text(font,askOnly?"Ask the owner before assuming a decorative head is for sale.":"H outlines a frame; Move changes sale/ask category.",x+9,y+23,0xFFFFBE83,false);
-        g.text(font,"Head name / frame XYZ",x+9,y+65,0xFF98D8EF,false);
+        g.text(font,"Head name / XYZ",x+9,y+65,0xFF98D8EF,false);
         g.text(font,"Candidate price / matching state",x+265,y+65,0xFF98D8EF,false);
         for(int i=0;i<ROWS;i++) {
             Entry e=rows[i]; if(e==null)continue;
@@ -335,13 +371,15 @@ public final class HeadShopScreen extends Screen {
             g.fill(x+5,yy-3,x+WIDTH-5,yy+24,i%2==0?0x66334455:0x44243341);
             BlockPos p=e.head().position();
             g.text(font,shorten(e.head().displayName(),32),x+9,yy,e.head().nameColor(),e.head().nameBold());
-            g.text(font,e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ(),x+9,yy+12,0xFFB8C8D2,false);
+            HeadCatalogue.SavedHead stored=storedRecord(e);
+            String locality=stored==null?"":(validName(stored.town)?"  "+stored.town:stored.wilderness?"  Wilderness":"  Location pending");
+            g.text(font,e.unavailable()?"Not currently listed":p.getX()+", "+p.getY()+", "+p.getZ()+locality,x+9,yy+12,0xFFB8C8D2,false);
             var q=e.payment();
             g.text(font,q==null?"Price not linked":String.format(Locale.ROOT,"%.2fG / %dx (%s)",q.bundlePrice(),q.amount(),shorten(q.item(),12)),
                 x+265,yy,0xFFFFD17D,false);
             g.text(font,shorten(e.status(),37),x+265,yy+12,0xFFB8C8D2,false);
         }
-        g.text(font,"Loaded frames: "+entries.size()+" | page "+(page+1)+"/"+Math.max(1,(entries.size()+ROWS-1)/ROWS),
+        g.text(font,"Heads: "+entries.size()+" | page "+(page+1)+"/"+Math.max(1,(entries.size()+ROWS-1)/ROWS),
             x+9,y+HEIGHT-47,0xFFE2E6EB,false);
         g.text(font,"Move: switch category | ★: save | H: frame | T/N/Go: if location known",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
     }
