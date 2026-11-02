@@ -30,6 +30,7 @@ public final class HeadShopScreen extends Screen {
     private int page;
     private final Entry[] rows = new Entry[ROWS];
     private final Button[] details = new Button[ROWS];
+    private final Button[] renameButtons = new Button[ROWS];
     private final Button[] go = new Button[ROWS];
     private final Button[] townButtons = new Button[ROWS];
     private final Button[] nationButtons = new Button[ROWS];
@@ -86,19 +87,21 @@ public final class HeadShopScreen extends Screen {
             final int row=i;
             int ry=y+83+i*30;
             classifyButtons[i]=addRenderableWidget(Button.builder(Component.literal("Move"),b -> moveCategory(row))
-                .bounds(x+367,ry,43,20).build());
+                .bounds(x+367,ry,38,20).build());
             favoriteButtons[i]=addRenderableWidget(Button.builder(Component.literal("☆"),b -> toggleFavorite(row))
-                .bounds(x+414,ry,22,20).build());
+                .bounds(x+408,ry,20,20).build());
             details[i]=addRenderableWidget(Button.builder(Component.literal("i"),b -> info(row))
-                .bounds(x+440,ry,22,20).build());
+                .bounds(x+431,ry,20,20).build());
+            renameButtons[i]=addRenderableWidget(Button.builder(Component.literal("R"),b -> rename(row))
+                .bounds(x+454,ry,20,20).build());
             highlight[i]=addRenderableWidget(Button.builder(Component.literal("H"),b -> mark(row))
-                .bounds(x+466,ry,22,20).build());
+                .bounds(x+477,ry,20,20).build());
             townButtons[i]=addRenderableWidget(Button.builder(Component.literal("T"),b -> travelExplicit(row,false))
-                .bounds(x+492,ry,22,20).build());
+                .bounds(x+500,ry,20,20).build());
             nationButtons[i]=addRenderableWidget(Button.builder(Component.literal("N"),b -> travelExplicit(row,true))
-                .bounds(x+518,ry,22,20).build());
+                .bounds(x+523,ry,20,20).build());
             go[i]=addRenderableWidget(Button.builder(Component.literal("Go"),b -> travel(row))
-                .bounds(x+544,ry,35,20).build());
+                .bounds(x+546,ry,33,20).build());
         }
         rebuildCatalogue();
     }
@@ -241,6 +244,7 @@ public final class HeadShopScreen extends Screen {
                 classifyButtons[i].setMessage(Component.literal(askOnly?"Sale":"Ask"));
             }
             if(details[i]!=null) {details[i].visible=rows[i]!=null;details[i].active=rows[i]!=null;}
+            if(renameButtons[i]!=null){renameButtons[i].visible=rows[i]!=null && !rows[i].unavailable();renameButtons[i].active=renameButtons[i].visible;}
             if(go[i]!=null) {go[i].visible=rows[i]!=null;go[i].active=rows[i]!=null && !rows[i].unavailable() && (knownTown(rows[i]) || knownNation(rows[i]));}
             if(townButtons[i]!=null) {townButtons[i].visible=rows[i]!=null;townButtons[i].active=rows[i]!=null && !rows[i].unavailable() && knownTown(rows[i]);}
             if(nationButtons[i]!=null) {nationButtons[i].visible=rows[i]!=null;nationButtons[i].active=rows[i]!=null && !rows[i].unavailable() && knownNation(rows[i]);}
@@ -253,6 +257,13 @@ public final class HeadShopScreen extends Screen {
         }
     }
 
+    private void rename(int row) {
+        Entry e=rows[row];
+        if(e==null || e.unavailable())return;
+        HeadCatalogue.SavedHead stored=storedRecord(e);
+        if(stored==null)return;
+        minecraft.gui.setScreen(new HeadRenameScreen(this,stored,askOnly));
+    }
     private void moveCategory(int row) {
         Entry e=rows[row]; if(e==null || e.unavailable())return;
         String dim=storedDimension(e);
@@ -382,7 +393,7 @@ public final class HeadShopScreen extends Screen {
         }
         g.text(font,"Heads: "+entries.size()+" | page "+(page+1)+"/"+Math.max(1,(entries.size()+ROWS-1)/ROWS),
             x+9,y+HEIGHT-47,0xFFE2E6EB,false);
-        g.text(font,"Move: switch category | ★: save | H: frame | T/N/Go: if location known",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
+        g.text(font,"Move: category | R: rename | ★: favorite | H: trace | T/N/Go: travel",x+9,y+HEIGHT-36,0xFFB8BEC7,false);
     }
     @Override public void onClose() {minecraft.gui.setScreen(previous);}
 }

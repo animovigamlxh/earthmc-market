@@ -25,6 +25,7 @@ public final class HeadCatalogue {
         public String dimension;
         public int x,y,z;
         public String name, fingerprint;
+        public String manualName;
         public boolean specific;
         public int nameColor;
         public boolean nameBold;
@@ -40,7 +41,7 @@ public final class HeadCatalogue {
             lastSeen=System.currentTimeMillis();
         }
         public BlockPos pos() { return new BlockPos(x,y,z); }
-        public HeadFrameScanner.Head asHead() { return new HeadFrameScanner.Head(pos(),name,fingerprint,specific,nameColor==0?0xFF82E7B4:nameColor,nameBold,nameSource==null?"legacy":nameSource); }
+        public HeadFrameScanner.Head asHead() { return new HeadFrameScanner.Head(pos(),manualName==null || manualName.isBlank()?name:manualName,fingerprint,specific,nameColor==0?0xFF82E7B4:nameColor,nameBold,nameSource==null?"legacy":nameSource); }
     }
     private static final Map<String,SavedHead> saved = new HashMap<>();
     private static final Map<String,Integer> missing = new HashMap<>();
@@ -158,12 +159,23 @@ public final class HeadCatalogue {
            || old.nameColor!=head.nameColor() || old.nameBold!=head.nameBold()
            || !java.util.Objects.equals(old.nameSource,head.nameSource())) {
             SavedHead updated=new SavedHead(dimension,head);
-            if(old!=null){ updated.town=old.town;updated.nation=old.nation;updated.wilderness=old.wilderness; }
+            if(old!=null){ updated.town=old.town;updated.nation=old.nation;updated.wilderness=old.wilderness;
+                if(java.util.Objects.equals(old.fingerprint,head.fingerprint()) || head.fingerprint().isBlank() || old.fingerprint==null || old.fingerprint.isBlank())updated.manualName=old.manualName; }
             saved.put(k,updated);dirty=true;
         } else old.lastSeen=System.currentTimeMillis();
         missing.remove(k);
     }
 
+    /** A manually assigned label applies to this recorded head, not all same-named heads. */
+    public static void rename(SavedHead head,String text) {
+        if(head==null)return;
+        String clean=text==null?"":text.strip();
+        if(clean.length()>80)clean=clean.substring(0,80);
+        SavedHead current=saved.get(key(head.dimension,head.pos()));
+        if(current==null)return;
+        current.manualName=clean.isBlank()?null:clean;
+        dirty=true;
+    }
     public static void scan(Minecraft mc) {
         if(mc==null || mc.level==null || mc.player==null || !EarthMarketClient.isEarthMc(mc)) return;
         String dimension=mc.level.dimension().toString();
@@ -179,7 +191,8 @@ public final class HeadCatalogue {
                 || head.nameColor()!=old.nameColor || head.nameBold()!=old.nameBold
                 || !java.util.Objects.equals(head.nameSource(),old.nameSource)) {
                 SavedHead updated=new SavedHead(dimension,head);
-                if(old!=null){updated.town=old.town;updated.nation=old.nation;updated.wilderness=old.wilderness;}
+                if(old!=null){updated.town=old.town;updated.nation=old.nation;updated.wilderness=old.wilderness;
+                    if(java.util.Objects.equals(old.fingerprint,head.fingerprint()) || head.fingerprint().isBlank() || old.fingerprint==null || old.fingerprint.isBlank())updated.manualName=old.manualName;}
                 saved.put(key,updated); changed=true;
             } else old.lastSeen=System.currentTimeMillis();
             missing.remove(key);
