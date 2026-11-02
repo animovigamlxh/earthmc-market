@@ -48,6 +48,17 @@ public final class HeadDebug {
                 }
             }
         }
+        if(be instanceof SkullBlockEntity) {
+            for(Class<?> type=be.getClass();type!=null && type!=Object.class;type=type.getSuperclass()) {
+                for(var f:type.getDeclaredFields()) {
+                    String n=f.getName().toLowerCase(java.util.Locale.ROOT);
+                    if(java.lang.reflect.Modifier.isStatic(f.getModifiers()) || (!n.contains("owner") && !n.contains("profile") && !f.getType().getSimpleName().contains("Profile")))continue;
+                    try { f.setAccessible(true);Object v=f.get(be);
+                        say(mc,"Profile field="+f.getName()+" type="+type(v)+" present="+(v!=null));
+                    } catch(ReflectiveOperationException | RuntimeException ignored) {say(mc,"Profile field inaccessible");}
+                }
+            }
+        }
         HeadFrameScanner.Head scanned=HeadFrameScanner.blockAt(mc,pos);
         if(scanned==null) {say(mc,"Scanner: not a vanilla PLAYER_HEAD/PLAYER_WALL_HEAD");return;}
         say(mc,"Scanner name="+scanned.displayName()+" skinAvailable="+scanned.fingerprint().startsWith("skin:"));

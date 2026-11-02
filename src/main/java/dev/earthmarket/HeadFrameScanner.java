@@ -152,25 +152,34 @@ public final class HeadFrameScanner {
         return result;
     }
 
-    /** Client versions differ in whether skull owner is exposed as a component,
-     * ResolvableProfile, or a private field. Only use the data actually sent by the server. */
+    /** Minecraft 26.x stores placed-head skins in a ResolvableProfile on the block entity.
+     * The profile is frequently nested; inspecting only a getOwnerProfile() method (which
+     * can be static) or only ResolvableProfile.properties() loses the actual skin data. */
     private static Object skullProfile(SkullBlockEntity skull) {
-        // SkullBlockEntity has no getComponents() method in the 26.2 mappings.
-        // Inspect only supported runtime accessors/fields below.
-        for(String method:new String[]{"getOwnerProfile","getProfile","getOwner"}) {
+        // Nonstatic instance accessors only: never invoke static profile factories on a skull.
+        for(String method:new String[]{"getOwner", "getProfile", "getOwnerProfile"}) {
             Object value=invokeNoArg(skull,method);
-            if(value!=null)return unwrap(value);
+            if(value!=null && isProfileLike(value))return value;
         }
-        Class<?> type=skull.getClass();
-        while(type!=null && type!=Object.class) {
+        for(Class<?> type=skull.getClass();type!=null && type!=Object.class;type=type.getSuperclass()) {
             for(var field:type.getDeclaredFields()) {
-                if(!java.util.regex.Pattern.compile("owner|profile",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(field.getName()).find())continue;
-                try {field.setAccessible(true);Object value=unwrap(field.get(skull));if(value!=null)return value;}
-                catch (ReflectiveOperationException | RuntimeException ignored) { }
+                if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;
+                String name=field.getName().toLowerCase(java.util.Locale.ROOT);
+                String fieldType=field.getType().getSimpleName().toLowerCase(java.util.Locale.ROOT);
+                if(!(name.contains("owner")||name.contains("profile")||fieldType.contains("profile")))continue;
+                try {
+                    field.setAccessible(true);
+                    Object value=unwrap(field.get(skull));
+                    if(value!=null && isProfileLike(value))return value;
+                } catch(ReflectiveOperationException | RuntimeException ignored) {}
             }
-            type=type.getSuperclass();
         }
         return null;
+    }
+    private static boolean isProfileLike(Object object) {
+        if(object==null)return false;
+        String n=object.getClass().getName();
+        return n.contains("Profile") && !n.contains("ProfileResolver");
     }
     private static Object unwrap(Object value) {
         if(value instanceof java.util.Optional<?> optional)return optional.orElse(null);
@@ -178,31 +187,66 @@ public final class HeadFrameScanner {
     }
     private static Object invokeNoArg(Object object,String name) {
         if(object==null)return null;
-        Class<?> type=object.getClass();
-        while(type!=null) {
-            try {var m=type.getDeclaredMethod(name);m.setAccessible(true);return unwrap(m.invoke(object));}
-            catch(ReflectiveOperationException | RuntimeException ignored) {type=type.getSuperclass();}
+        for(Class<?> type=object.getClass();type!=null;type=type.getSuperclass()) {
+            try {
+                var m=type.getDeclaredMethod(name);
+                if(java.lang.reflect.Modifier.isStatic(m.getModifiers()))continue;
+                m.setAccessible(true);
+                return unwrap(m.invoke(object));
+            } catch(ReflectiveOperationException | RuntimeException ignored) {}
         }
         return null;
     }
-    /** Extract actual texture property if available; otherwise UUID/name, never a generic label. */
+    private static Object gameProfile(Object profile) {
+        if(profile==null)return null;
+        // ResolvableProfile (26.x) wraps com.mojang.authlib.GameProfile.
+        for(String method:new String[]{"partialProfile","getGameProfile","profile","getProfile"}) {
+            Object inner=invokeNoArg(profile,method);
+            if(inner!=null && inner!=profile && isProfileLike(inner))return inner;
+        }
+        for(Class<?> type=profile.getClass();type!=null && type!=Object.class;type=type.getSuperclass()) {
+            for(var field:type.getDeclaredFields()) {
+                if(java.lang.reflect.Modifier.isStatic(field.getModifiers()))continue;
+                if(!field.getType().getName().equals("com.mojang.authlib.GameProfile"))continue;
+                try {field.setAccessible(true);Object inner=field.get(profile);if(inner!=null)return inner;}
+                catch(ReflectiveOperationException | RuntimeException ignored) {}
+            }
+        }
+        return profile;
+    }
+    /** Texture fingerprint first. A shared HeadDatabase owner/UUID must NOT identify a skin. */
     private static String profileIdentity(Object profile) {
+        if(profile==null)return "";
+        Object actual=gameProfile(profile);
+        String texture=textureProperty(actual);
+        if(texture.isBlank() && actual!=profile)texture=textureProperty(profile);
+        if(!texture.isBlank())return "texture:"+texture;
+        // 26.x ResolvableProfile may instead contain a per-skin override (player skin patch).
+        Object patch=invokeNoArg(profile,"skinPatch");
+        if(patch==null)patch=invokeNoArg(profile,"getOverride");
+        if(patch!=null) {
+            for(String method:new String[]{"body","texture","skin","getBody","getTexture"}) {
+                Object v=invokeNoArg(patch,method);
+                if(v!=null && !v.toString().isBlank() && !v.toString().equals("Optional.empty"))
+                    return "skin-patch:"+v;
+            }
+        }
+        String name=profileName(profile);
+        if(name==null || name.equalsIgnoreCase("HeadDatabase"))return "";
+        Object uuid=invokeNoArg(actual,"id");
+        if(uuid==null)uuid=invokeNoArg(actual,"getId");
+        if(uuid instanceof java.util.UUID)return "uuid:"+uuid;
+        return "name:"+name.toLowerCase(java.util.Locale.ROOT);
+    }
+    private static String textureProperty(Object profile) {
         if(profile==null)return "";
         Object props=invokeNoArg(profile,"properties");
         if(props==null)props=invokeNoArg(profile,"getProperties");
-        if(props!=null) {
-            Object textures=invokeOneArg(props,"get","textures");
-            String value=textureValue(textures);
-            if(!value.isBlank())return "texture:"+value;
-            value=textureValue(props);
-            if(!value.isBlank())return "texture:"+value;
-        }
-        Object uuid=invokeNoArg(profile,"id");
-        if(uuid==null)uuid=invokeNoArg(profile,"getId");
-        if(uuid instanceof java.util.Optional<?> opt)uuid=opt.orElse(null);
-        if(uuid instanceof java.util.UUID)return "uuid:"+uuid;
-        String name=profileName(profile);
-        return name==null || name.equalsIgnoreCase("HeadDatabase")?"":"name:"+name.toLowerCase(java.util.Locale.ROOT);
+        if(props==null)return "";
+        Object textures=invokeOneArg(props,"get","textures");
+        String value=textureValue(textures);
+        if(!value.isBlank())return value;
+        return textureValue(props);
     }
     private static Object invokeOneArg(Object object,String method,Object argument) {
         if(object==null)return null;
@@ -214,6 +258,11 @@ public final class HeadFrameScanner {
         if(prop instanceof Iterable<?> iterable) {
             for(Object element:iterable) {String value=textureValue(element);if(!value.isBlank())return value;}
             return "";
+        }
+        // Guava property collection may be a map: iterate only textures properties.
+        if(prop instanceof java.util.Map<?,?> map) {
+            Object textures=map.get("textures");
+            return textureValue(textures);
         }
         Object name=invokeNoArg(prop,"name");
         if(name==null)name=invokeNoArg(prop,"getName");
@@ -232,14 +281,13 @@ public final class HeadFrameScanner {
     }
 
     private static String profileName(Object profile) {
-        if (profile == null) return null;
-        for (String method : new String[] {"name", "getName"}) {
-            try {
-                Method m = profile.getClass().getMethod(method);
-                Object value = m.invoke(profile);
-                if (value instanceof java.util.Optional<?> optional) value = optional.orElse(null);
-                if (value instanceof String name && !name.isBlank()) return name;
-            } catch (ReflectiveOperationException ignored) { }
+        if(profile==null)return null;
+        for(Object source:new Object[]{profile,gameProfile(profile)}) {
+            if(source==null)continue;
+            for(String method:new String[]{"name","getName"}) {
+                Object v=invokeNoArg(source,method);
+                if(v instanceof String name && !name.isBlank())return name;
+            }
         }
         return null;
     }
