@@ -8,38 +8,44 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
 
-/** Toggle a wishlist entry for the actual aimed frame, with position fallback. */
+/** Toggle the product wishlist by aiming at the actual frame, never by matching a name. */
 public final class QuickHeadFavorite {
     private QuickHeadFavorite() {}
 
     public static void toggleAimed(Minecraft mc) {
         if (mc == null || mc.level == null || mc.player == null || !EarthMarketClient.isEarthMc(mc)) return;
-        ItemFrame frame = aimedFrame(mc);
-        if (frame == null) {
-            message(mc,"Aim at a head item frame within 6 blocks, then use /emprice favhead.");
+        BlockPos selectedPos = null;
+        ItemFrame frame = mc.hitResult instanceof BlockHitResult ? null : aimedFrame(mc);
+        if (frame != null) selectedPos = frame.blockPosition();
+        if (selectedPos == null && mc.hitResult instanceof BlockHitResult blockHit) {
+            BlockPos p = blockHit.getBlockPos();
+            var block = mc.level.getBlockState(p).getBlock();
+            if (block == Blocks.PLAYER_HEAD || block == Blocks.PLAYER_WALL_HEAD
+                    || block == Blocks.PIGLIN_HEAD || block == Blocks.PIGLIN_WALL_HEAD)
+                selectedPos = p;
+        }
+        if (selectedPos == null) {
+            message(mc,"Aim at a player head block or head item frame, then use /emprice favhead.");
             return;
         }
-        HeadFrameScanner.Head selected = null;
-        for (HeadFrameScanner.Head head : HeadFrameScanner.nearby(mc)) {
-            if (head.position().equals(frame.blockPosition())) {
-                selected = head;
-                break;
-            }
+        String dimension = mc.level.dimension().toString();
+        HeadCatalogue.SavedHead stored = HeadCatalogue.get(dimension, selectedPos);
+        HeadFrameScanner.Head selected = stored == null ? null : stored.asHead();
+        if (selected == null) for (HeadFrameScanner.Head head : HeadFrameScanner.nearby(mc)) {
+            if (head.position().equals(selectedPos)) { selected = head; break; }
         }
         if (selected == null) {
-            message(mc,"The targeted item frame does not contain a detectable player head.");
+            message(mc,"No recorded head at target: run /emprice headscan and retry after scan finishes.");
             return;
         }
-        String dimension=mc.level.dimension().toString();
-        String identity=HeadFavorites.identityFingerprint(selected.fingerprint(),dimension,selected.position());
-        HeadCatalogue.SavedHead stored=HeadCatalogue.get(dimension,selected.position());
-        String town=stored==null?null:stored.town;
-        String nation=stored==null?null:stored.nation;
-        boolean wasFavorite = HeadFavorites.contains(selected.displayName(),identity);
-        HeadFavorites.toggle(selected.displayName(),identity,dimension,selected.position(),town,nation);
+        boolean wasFavorite = HeadFavorites.contains(selected.displayName(),selected.fingerprint(),dimension,selectedPos);
+        HeadFavorites.toggle(selected.displayName(),selected.fingerprint(),dimension,selectedPos);
         message(mc,(wasFavorite?"Removed favorite: ":"Favorited: ")+selected.displayName()
-            +" @ "+selected.position().toShortString());
+            +" @ "+selectedPos.toShortString());
     }
 
     private static ItemFrame aimedFrame(Minecraft mc) {

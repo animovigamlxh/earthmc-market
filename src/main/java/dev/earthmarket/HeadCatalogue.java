@@ -82,18 +82,6 @@ public final class HeadCatalogue {
     }
     public static List<SavedHead> all() { return new ArrayList<>(saved.values()); }
     public static SavedHead get(String dimension,BlockPos position) {return saved.get(key(dimension,position));}
-    /** Lazily fill missing historical geographical metadata without flooding the location API. */
-    public static void resolveHistory(Minecraft mc,int limit) {
-        if(mc==null || mc.level==null || !EarthMarketClient.isEarthMc(mc))return;
-        int submitted=0;
-        for(SavedHead h:new ArrayList<>(saved.values())) {
-            if(submitted>=limit)break;
-            if(h.wilderness || (h.town!=null && h.nation!=null))continue;
-            if(!h.dimension.equals(mc.level.dimension().toString()))continue;
-            requestLocation(mc,h.dimension,h.asHead());
-            submitted++;
-        }
-    }
     public static void tick(Minecraft mc) {
         if (mc==null || mc.player==null || mc.level==null || !EarthMarketClient.isEarthMc(mc)) return;
         // Five seconds per scan, not two. This is a separate scanner from QuickShop signs.
@@ -196,7 +184,6 @@ public final class HeadCatalogue {
                     || head.fingerprint().isBlank())) {
                     current.town=result.town();current.nation=result.nation();
                     current.wilderness=result.wilderness();dirty=true;
-                    HeadFavorites.updateLocation(current.name,current.fingerprint,current.town,current.nation);
                 }
             });
         });

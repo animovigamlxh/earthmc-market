@@ -67,6 +67,7 @@ public final class EarthMarketClient implements ClientModInitializer {
     private static boolean openArbitrageGui = false;
     private static int openGuiInTicks = -1;
     private static int openHeadsGuiInTicks = -1;
+    private static int openSellGuiInTicks = -1;
     // Intentionally strict: no quote is created when type, price or quantity is ambiguous.
     private static final Pattern SHOP_LINE = Pattern.compile("(?i)(?:quickshop|shop)\\s*[:|]\\s*([a-z0-9_:.-]+)\\s+(BUY|SELL)\\s+(\\d+)\\s*(?:items?\\s*)?(?:for|@)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:g|gold)\\b");
 
@@ -141,6 +142,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 lastInspectedShop = null;
                 openGuiInTicks = -1;
                 openHeadsGuiInTicks = -1;
+                openSellGuiInTicks = -1;
                 return;
             }
             SIGNS.tick(client);
@@ -168,6 +170,10 @@ public final class EarthMarketClient implements ClientModInitializer {
             if (openHeadsGuiInTicks >= 0 && openHeadsGuiInTicks-- == 0) {
                 openHeadsGuiInTicks = -1;
                 if (client.player != null) client.gui.setScreen(new HeadShopScreen(new MarketScreen()));
+            }
+            if (openSellGuiInTicks >= 0 && openSellGuiInTicks-- == 0) {
+                openSellGuiInTicks = -1;
+                client.gui.setScreen(new SellModeScreen(new MarketScreen()));
             }
             if (openGuiInTicks < 0) return;
             if (openGuiInTicks-- > 0) return;
@@ -227,6 +233,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                     .then(literal("on").executes(ctx -> { setAutoScanMessages(true); say("Automatic scan chat messages ON."); return 1; }))
                     .then(literal("off").executes(ctx -> { setAutoScanMessages(false); say("Automatic scan chat messages OFF (scans still run). "); return 1; }))
                     .executes(ctx -> { say("Automatic scan chat messages: " + (showAutoScanMessages ? "ON" : "OFF") + ". Use /emprice scanmsg on|off."); return 1; }))
+                .then(literal("sellmode").executes(ctx -> { openSellGuiInTicks = 2; say("Opening Sell Mode..."); return 1; }))
                 .then(literal("gui").executes(ctx -> { openArbitrageGui = false; openGuiInTicks = 2; say("Opening Market GUI..."); return 1; }))
                 .then(literal("arbitrage").executes(ctx -> { openArbitrageGui = true; openGuiInTicks = 2; say("Opening arbitrage opportunities..."); return 1; }))
                 .then(literal("import").executes(ctx -> { importFile(); return 1; }))
@@ -239,7 +246,7 @@ public final class EarthMarketClient implements ClientModInitializer {
                 .then(literal("restoredeleted").executes(ctx -> { say("Restored " + restoreDeletedSigns() + " ignored sign locations; rescan nearby to rediscover them."); return 1; }))
                 .then(literal("reload").executes(ctx -> { QUOTES.clear(); load(); say("Reloaded " + QUOTES.size() + " records from disk."); return 1; }))
                 .then(literal("clear").executes(ctx -> { QUOTES.clear(); save(); say("Local price records cleared."); return 1; }))
-                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | arbitrage | scan | heads | headsask | headscan | headdebug | favhead | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
+                .executes(ctx -> { say("/emprice add <item> <buy|sell> <gold> <amount> <shop> | find <item> | gui | sellmode | arbitrage | scan | heads | headsask | headscan | headdebug | favhead | autoscan <on|off> | scanmsg <on|off> | recent | enchant <details> | stats | locate | locdebug | backup | reload | import | clear"); return 1; })
         ));
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay || emittingLocalMessage || !isEarthMc(Minecraft.getInstance())) return;

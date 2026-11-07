@@ -12,8 +12,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import net.minecraft.core.BlockPos;
 
-/** Persistent wishlist keyed by item identity or, when absent, a dimension-scoped position. */
+/** Persistent wishlist keyed by item identity, deliberately independent of item-frame coordinates. */
 public final class HeadFavorites {
     private static final Path FILE = Path.of("config", "earthmc-market", "head-favorites.json");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -22,8 +23,6 @@ public final class HeadFavorites {
         public String name;
         public String fingerprint;
         public long savedAt;
-        public String dimension, town, nation;
-        public Integer x,y,z;
         public Favorite() {}
         Favorite(String id, String name, String fingerprint) {
             this.id=id; this.name=name; this.fingerprint=fingerprint; savedAt=System.currentTimeMillis();
@@ -35,39 +34,26 @@ public final class HeadFavorites {
         if(fingerprint != null && !fingerprint.isBlank()) return "fingerprint:" + fingerprint;
         return "name:" + (name == null ? "" : name.strip().toLowerCase(Locale.ROOT));
     }
-    /** Location-scoped fallback for heads without a reliable profile/texture identity.
-     * Never use the display name alone to identify a physical head. */
-    public static String identityFingerprint(String fingerprint, String dimension, net.minecraft.core.BlockPos pos) {
-        if (fingerprint != null && !fingerprint.isBlank()) return fingerprint;
-        if (dimension == null || dimension.isBlank() || pos == null) return "";
-        return "location:" + dimension + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
+    /** Prefer immutable skin identity when present; otherwise a specific placed head's
+     * world position. Never merge unrelated heads solely because they share a name. */
+    public static String id(String name, String fingerprint, String dimension, BlockPos pos) {
+        if (fingerprint != null && !fingerprint.isBlank() && !"unknown".equalsIgnoreCase(fingerprint))
+            return id(name, fingerprint);
+        if (dimension != null && !dimension.isBlank() && pos != null)
+            return "location:" + dimension + ":" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ();
+        return id(name, fingerprint);
+    }
+    public static boolean contains(String name, String fingerprint, String dimension, BlockPos pos) {
+        return favorites.containsKey(id(name, fingerprint, dimension, pos));
+    }
+    public static void toggle(String name, String fingerprint, String dimension, BlockPos pos) {
+        String key = id(name, fingerprint, dimension, pos);
+        if (favorites.containsKey(key)) favorites.remove(key);
+        else favorites.put(key, new Favorite(key, name, fingerprint));
+        save();
     }
     public static boolean contains(String name, String fingerprint) {
         return favorites.containsKey(id(name,fingerprint));
-    }
-    public static String town(String name,String fingerprint) {
-        Favorite f=favorites.get(id(name,fingerprint));return f==null?null:f.town;
-    }
-    public static String nation(String name,String fingerprint) {
-        Favorite f=favorites.get(id(name,fingerprint));return f==null?null:f.nation;
-    }
-    public static void updateLocation(String name,String fingerprint,String town,String nation) {
-        Favorite f=favorites.get(id(name,fingerprint));if(f==null)return;
-        if(java.util.Objects.equals(f.town,town) && java.util.Objects.equals(f.nation,nation))return;
-        if(town!=null)f.town=town;
-        if(nation!=null)f.nation=nation;
-        save();
-    }
-    public static void toggle(String name,String fingerprint,String dimension,net.minecraft.core.BlockPos pos,String town,String nation) {
-        String key=id(name,fingerprint);
-        if(favorites.containsKey(key))favorites.remove(key);
-        else {
-            Favorite f=new Favorite(key,name,fingerprint);
-            f.dimension=dimension;f.town=town;f.nation=nation;
-            if(pos!=null){f.x=pos.getX();f.y=pos.getY();f.z=pos.getZ();}
-            favorites.put(key,f);
-        }
-        save();
     }
     public static void toggle(String name, String fingerprint) {
         String key=id(name,fingerprint);

@@ -69,7 +69,7 @@ public final class MarketScreen extends Screen {
             availabilityButton.setMessage(Component.literal(stockFilterLabel()));
             page = 0; refresh();
         }).bounds(left + 315, top + 297, 110, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("Arbitrage"), b -> { remember(); this.minecraft.gui.setScreen(new ArbitrageScreen()); })
+        addRenderableWidget(Button.builder(Component.literal("Sell Mode"), b -> { remember(); minecraft.gui.setScreen(new SellModeScreen(new MarketScreen())); })
             .bounds(left + 158, top + 297, 78, 20).build());
         previous = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> { page--; refresh(); })
             .bounds(left + 6, top + 297, 80, 20).build());

@@ -293,3 +293,12 @@ Open `/emprice gui` and select **Heads**, or use `/emprice heads`. The screen li
 - No name search or coordinate matching needed; frames with ambiguous identity are rejected to avoid favoriting the wrong same-name head.
 - Uses the same persistent `head-favorites.json` file as the Heads GUI.
 - A keyboard/macro binding may be assigned to the command in a client that supports chat-command shortcuts.
+
+## Sell Mode (v0.5.51)
+
+Install Chest Tracker 2.8.4+26.2 separately and use `/emprice sellmode` (or GUI → Sell Mode).
+Sell Mode reads **all** remembered container snapshots regardless of ownership, compares exact ordinary
+item IDs to recorded BUY offers, and shows best-single-buyer possible revenue respecting capacity and
+whole-transaction lots. Use **Boxes** to view historical container positions and **Go** for buyer travel.
+Only open/Refresh reads Chest Tracker; searching and paging do not scan the world.
+See `RELEASE_NOTES_v0.5.51.md` for limitations.
