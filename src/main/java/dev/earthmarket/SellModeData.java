@@ -18,7 +18,7 @@ public final class SellModeData {
     public record Box(String dimension, BlockPos position, int quantity, Instant observed) {}
     public record Offer(String itemId, String name, int count, double unitGold, int possible,
                         boolean capacityUnknown, EarthMarketClient.DisplayQuote buyer,
-                        List<Box> boxes) {
+                        List<Box> boxes, String matchNote) {
         public double expectedGold() { return possible * unitGold; }
     }
     public record Snapshot(List<Offer> offers, int boxes, int items, String warning) {}
@@ -76,42 +76,54 @@ public final class SellModeData {
                 for (var line : perBox.entrySet()) stock.get(line.getKey()).boxes.add(new Box(dimension, pos, line.getValue(), observed));
             }
         }
-        // Index buyer offers once, avoiding nested full-database scans on each keystroke/frame.
+        // Build a small name index once. QuickShop signs often store localized names
+        // (e.g. 铁锭) while Chest Tracker inventory uses registry IDs (iron_ingot).
+        // Compare BOTH item ID and the localized ItemStack display name.
         Map<String, List<EarthMarketClient.DisplayQuote>> buyers = new HashMap<>();
+        int buyQuoteCount = 0;
         for (var q : EarthMarketClient.displayQuotes()) {
             if (!"buy".equalsIgnoreCase(q.type()) || q.unitPrice() <= 0 || q.item() == null) continue;
             if (MarketScreen.stockClass(q) == 3) continue;
-            // Never treat a special enchant/potion/disc variant as an ordinary item.
             if (q.variantKey() != null && !q.variantKey().isBlank()) continue;
             if (q.enchantments() != null && !q.enchantments().isBlank()) continue;
             buyers.computeIfAbsent(normalize(q.item()), k -> new ArrayList<>()).add(q);
+            buyQuoteCount++;
         }
         List<Offer> result = new ArrayList<>();
-        for (MutableStock s : stock.values()) {
-            if (s.special) continue; // uncertain NBT/component variants deliberately excluded
-            String simpleId = normalize(s.id);
-            // Exact item ID matching; never substring-match unrelated goods.
-            var quotes = buyers.getOrDefault(simpleId, List.of());
-            if (quotes.isEmpty()) continue;
+        int matched = 0;
+        for (MutableStock item : stock.values()) {
+            String normalizedId = normalize(item.id);
+            String normalizedName = normalize(item.name);
+            List<EarthMarketClient.DisplayQuote> quotes = new ArrayList<>(buyers.getOrDefault(normalizedId, List.of()));
+            if (!normalizedName.equals(normalizedId)) {
+                // Avoid double-counting a quote if both keys refer to the same text.
+                for (var q : buyers.getOrDefault(normalizedName, List.of())) if (!quotes.contains(q)) quotes.add(q);
+            }
             EarthMarketClient.DisplayQuote best = null;
             int possible = 0;
-            for (var q : quotes) {
-                int candidate = Math.min(s.count, q.available() == null ? s.count : Math.max(0, q.available()));
-                // QuickShop is sold in complete lots (e.g. 64 items for 1G).
-                int lot = Math.max(1, q.amount());
-                candidate -= candidate % lot;
-                if (candidate <= 0) continue;
-                if (best == null || candidate * q.unitPrice() > possible * best.unitPrice()) {
-                    best = q;
-                    possible = candidate;
+            String note = item.special ? "Special item: manual variant check required" : "No matching BUY quote";
+            if (!item.special) {
+                if (!quotes.isEmpty()) note = "Buyer has insufficient capacity or requires full lots";
+                for (var q : quotes) {
+                    int candidate = Math.min(item.count, q.available() == null ? item.count : Math.max(0, q.available()));
+                    int lot = Math.max(1, q.amount());
+                    candidate -= candidate % lot;
+                    if (candidate <= 0) continue;
+                    if (best == null || candidate * q.unitPrice() > possible * best.unitPrice()) {
+                        best = q;
+                        possible = candidate;
+                    }
                 }
             }
-            if (best != null) result.add(new Offer(s.id, s.name, s.count, best.unitPrice(), possible,
-                best.available() == null, best, List.copyOf(s.boxes)));
+            if (best != null) { matched++; note = "BUY quote matched"; }
+            result.add(new Offer(item.id, item.name, item.count, best == null ? 0 : best.unitPrice(),
+                possible, best != null && best.available() == null, best, List.copyOf(item.boxes), note));
         }
-        result.sort(Comparator.comparingDouble(Offer::expectedGold).reversed());
+        // Matched offers first, then all other Chest Tracker records. The UI offers a toggle.
+        result.sort(Comparator.comparingDouble(Offer::expectedGold).reversed().thenComparing(Offer::name));
         return new Snapshot(List.copyOf(result), totalBoxes, totalItems,
-            "All Chest Tracker memories are historical snapshots; locations and quantities may be stale.");
+            "Matched " + matched + "/" + result.size() + " item types to " + buyQuoteCount
+                + " BUY offers; all chest contents are historical snapshots.");
     }
     private static final class MutableStock {
         final String id, name;
@@ -121,7 +133,9 @@ public final class SellModeData {
         MutableStock(String id, String name, boolean special) { this.id = id; this.name = name; this.special = special; }
     }
     private static String normalize(String id) {
-        return id.toLowerCase(Locale.ROOT).replace("minecraft:", "").replace('-', '_').trim();
+        if (id == null) return "";
+        return id.replaceAll("§[0-9a-fk-orA-FK-OR]", "").toLowerCase(Locale.ROOT)
+            .replace("minecraft:", "").replace('-', '_').replace(' ', '_').trim();
     }
     private static int comparePos(BlockPos a, BlockPos b) {
         int c = Integer.compare(a.getX(), b.getX());

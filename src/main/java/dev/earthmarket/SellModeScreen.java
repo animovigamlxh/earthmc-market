@@ -18,7 +18,8 @@ public final class SellModeScreen extends Screen {
     private List<SellModeData.Offer> filtered = List.of();
     private EditBox search;
     private int page;
-    private Button previous, next;
+    private Button previous, next, toggle;
+    private boolean allStock = false;
     private final Button[] boxes = new Button[ROWS];
     private final Button[] go = new Button[ROWS];
 
@@ -33,6 +34,11 @@ public final class SellModeScreen extends Screen {
         search.setResponder(s -> {page = 0; filter();});
         addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> { snapshot = SellModeData.read(); filter(); })
             .bounds(x+365,y+28,83,20).build());
+        toggle = addRenderableWidget(Button.builder(Component.literal("All stock"), b -> {
+            allStock = !allStock;
+            page = 0;
+            filter();
+        }).bounds(x+365,y+51,116,19).build());
         addRenderableWidget(Button.builder(Component.literal("Back"), b -> minecraft.gui.setScreen(back))
             .bounds(x+461,y+28,122,20).build());
         previous = addRenderableWidget(Button.builder(Component.literal("< Prev"), b -> {page--; filter();})
@@ -52,8 +58,11 @@ public final class SellModeScreen extends Screen {
     private void filter() {
         String q = search == null ? "" : search.getValue().strip().toLowerCase(Locale.ROOT);
         List<SellModeData.Offer> matches = new ArrayList<>();
+        if (toggle != null) toggle.setMessage(Component.literal(allStock ? "Sellable only" : "All stock"));
         for (var offer : snapshot.offers()) {
-            String match = (offer.name()+" "+offer.itemId()+" "+offer.buyer().town()+" "+offer.buyer().nation()).toLowerCase(Locale.ROOT);
+            if (!allStock && offer.buyer() == null) continue;
+            String buyerText = offer.buyer() == null ? "" : " " + offer.buyer().town() + " " + offer.buyer().nation();
+            String match = (offer.name()+" "+offer.itemId()+buyerText).toLowerCase(Locale.ROOT);
             if (match.contains(q)) matches.add(offer);
         }
         filtered = matches;
@@ -66,7 +75,7 @@ public final class SellModeScreen extends Screen {
             if(go[i]!=null) {
                 go[i].visible=has;
                 var offer=has?filtered.get(page*ROWS+i):null;
-                go[i].active=has && offer!=null && !blank(offer.buyer().town());
+                go[i].active=has && offer!=null && offer.buyer()!=null && !blank(offer.buyer().town());
             }
         }
     }
@@ -80,7 +89,7 @@ public final class SellModeScreen extends Screen {
     }
     private void travel(int line) {
         var offer=get(line);
-        if(offer!=null) CapitalTravelResolver.prepare(minecraft,offer.buyer().town(),offer.buyer().nation(),offer.buyer());
+        if(offer!=null && offer.buyer()!=null) CapitalTravelResolver.prepare(minecraft,offer.buyer().town(),offer.buyer().nation(),offer.buyer());
     }
     private static String clip(String s,int max) {
         if(s==null) return "";
@@ -101,12 +110,17 @@ public final class SellModeScreen extends Screen {
             g.fill(x+6,ry-2,x+PANEL_W-7,ry+23,i%2==0?0x66304559:0x44304559);
             g.text(font,clip(offer.name(),24),x+11,ry,0xFF9FE9BB,false);
             g.text(font,"Stock: "+offer.count()+" in "+offer.boxes().size()+" boxes",x+11,ry+11,0xFFB9C6D2,false);
-            g.text(font,String.format(Locale.ROOT,"%.4f G / item",offer.unitGold()),x+193,ry,0xFFFFD487,false);
-            g.text(font,"Can sell: "+offer.possible()+(offer.capacityUnknown()?" (?)":""),x+193,ry+11,0xFFB9C6D2,false);
-            g.text(font,clip(offer.buyer().town(),17),x+330,ry,0xFFD2E2F8,false);
-            g.text(font,String.format(Locale.ROOT,"%s%.2fG",offer.capacityUnknown()?"~":"",offer.expectedGold()),x+330,ry+11,0xFFFFD487,false);
+            if (offer.buyer()!=null) {
+                g.text(font,String.format(Locale.ROOT,"%.4f G / item",offer.unitGold()),x+193,ry,0xFFFFD487,false);
+                g.text(font,"Can sell: "+offer.possible()+(offer.capacityUnknown()?" (?)":""),x+193,ry+11,0xFFB9C6D2,false);
+                g.text(font,clip(offer.buyer().town(),17),x+330,ry,0xFFD2E2F8,false);
+                g.text(font,String.format(Locale.ROOT,"%s%.2fG",offer.capacityUnknown()?"~":"",offer.expectedGold()),x+330,ry+11,0xFFFFD487,false);
+            } else {
+                g.text(font,"No confirmed BUY",x+193,ry,0xFFFFB77B,false);
+                g.text(font,clip(offer.matchNote(),46),x+193,ry+11,0xFFB9C6D2,false);
+            }
         }
-        g.text(font,"Recorded: "+snapshot.boxes()+" boxes / "+snapshot.items()+" items | Sellable: "+filtered.size()+" | Page "+(page+1),
+        g.text(font,"Recorded: "+snapshot.boxes()+" boxes / "+snapshot.items()+" items | Visible: "+filtered.size()+" | Page "+(page+1),
             x+10,y+268,0xFFCFD7E1,false);
         g.text(font,clip(snapshot.warning(),93),x+105,y+287,0xFFFFB77B,false);
     }
