@@ -12,4 +12,4 @@ tasks.withType(JavaCompile).configureEach { options.release = 25; options.encodi
 java { sourceCompatibility = JavaVersion.VERSION_25; targetCompatibility = JavaVersion.VERSION_25 }
 
 // Compile against the user-provided Chest Tracker API. The mod is installed separately.
-dependencies { modCompileOnly files('libs/chesttracker-2.8.4+26.2.jar') }
+dependencies { compileOnly files('libs/chesttracker-2.8.4+26.2.jar') }
